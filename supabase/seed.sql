@@ -1,0 +1,3 @@
+-- Optional: seed admins so they're rate-limit exempt.
+-- Run after creating the matching auth user. Replace the email below.
+-- update profiles set is_admin = true where email = 'admin@example.org';
