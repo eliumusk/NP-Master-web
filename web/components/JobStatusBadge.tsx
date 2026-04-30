@@ -9,19 +9,19 @@ const ZH_LABEL: Record<Status, string> = {
 };
 
 const STYLES: Record<Status, string> = {
-  queued:   "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
-  running:  "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-200",
-  done:     "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200",
-  failed:   "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-200",
-  canceled: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200",
+  queued:   "bg-bgc-other-soft   text-bgc-other-fg",
+  running:  "bg-bgc-nrp-soft     text-bgc-nrp-fg",
+  done:     "bg-bgc-terpene-soft text-bgc-terpene-fg",
+  failed:   "bg-bgc-alkaloid-soft text-bgc-alkaloid-fg",
+  canceled: "bg-bgc-ripp-soft    text-bgc-ripp-fg",
 };
 
 export function JobStatusBadge({ status }: { status: string }) {
   const key = (status as Status) in STYLES ? (status as Status) : "queued";
   const isRunning = key === "running";
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${STYLES[key]}`}>
-      {isRunning && <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-current" />}
+    <span className={`inline-flex items-center gap-1.5 rounded-pill px-2 py-0.5 text-xs font-medium ${STYLES[key]}`}>
+      {isRunning && <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-pill bg-current" />}
       {ZH_LABEL[key]}
     </span>
   );

@@ -2,51 +2,91 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Design tokens ──────────────────────────────────────────────── */
 :root {
   color-scheme: light dark;
-  --brand: 79 70 229;       /* indigo-600 */
-  --brand-fg: 255 255 255;
+
+  /* Light theme tokens (RGB triplets so Tailwind / <alpha-value> work) */
+  --bg:        255 255 255;
+  --surface:   255 255 255;
+  --elevated:  248 250 252;   /* slate-50 */
+  --border:    226 232 240;   /* slate-200 */
+  --fg:         15  23  42;   /* slate-900 */
+  --fg-muted:  100 116 139;   /* slate-500 */
+  --fg-subtle: 148 163 184;   /* slate-400 */
+
+  --brand:        79  70 229;   /* indigo-600 */
+  --brand-fg:    255 255 255;
+  --brand-soft:  238 242 255;   /* indigo-50 */
+  --brand-softer:224 231 255;   /* indigo-100 */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:           2   6  23;   /* slate-950 */
+    --surface:     15  23  42;   /* slate-900 */
+    --elevated:    30  41  59;   /* slate-800 */
+    --border:      30  41  59;   /* slate-800 */
+    --fg:         241 245 249;   /* slate-100 */
+    --fg-muted:   148 163 184;   /* slate-400 */
+    --fg-subtle:  100 116 139;   /* slate-500 */
+
+    --brand:       129 140 248;  /* indigo-400 */
+    --brand-fg:     17  24  39;
+    --brand-soft:   30  27  75;  /* indigo-950 */
+    --brand-softer: 49  46 129;  /* indigo-900 */
+  }
 }
 
 html, body {
   height: 100%;
+  background-color: rgb(var(--bg));
+  color: rgb(var(--fg));
 }
 
 body {
   font-feature-settings: "ss01" on, "cv11" on;
 }
 
-/* Tabular numerals for any element with .tabular-nums (already a util in Tailwind) — extra opt-in for headings */
+/* ─── Typography helpers ───────────────────────────────────────── */
 .numeric-display {
+  font-family: var(--font-mono), ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
 }
 
-/* Generic focus ring (a11y) */
+/* ─── Focus ring (a11y) ────────────────────────────────────────── */
 *:focus-visible {
   outline: 2px solid rgb(var(--brand));
   outline-offset: 2px;
   border-radius: 6px;
 }
 
-/* Skeleton shimmer */
+/* ─── Skeleton shimmer (used everywhere loading is a real wait) ── */
 @keyframes skeleton-shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
 }
 .skeleton {
-  background: linear-gradient(90deg, rgb(241 245 249) 0%, rgb(226 232 240) 50%, rgb(241 245 249) 100%);
+  background: linear-gradient(90deg,
+    rgb(var(--elevated)) 0%,
+    rgb(var(--border))   50%,
+    rgb(var(--elevated)) 100%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.5s ease-in-out infinite;
-}
-.dark .skeleton {
-  background: linear-gradient(90deg, rgb(30 41 59) 0%, rgb(51 65 85) 50%, rgb(30 41 59) 100%);
-  background-size: 200% 100%;
+  border-radius: 0.5rem;
 }
 
-/* Status pulsing dot for "running" jobs */
+/* ─── Pulse dot for "running" jobs ─────────────────────────────── */
 @keyframes pulse-dot {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.3); opacity: 0.6; }
+  0%, 100% { transform: scale(1);    opacity: 1;   }
+  50%      { transform: scale(1.3);  opacity: 0.6; }
 }
 .pulse-dot { animation: pulse-dot 1.4s ease-in-out infinite; }
+
+/* ─── Doc article styling (used in /docs/*) ────────────────────── */
+.prose-doc h2 { @apply mt-10 mb-3 text-2xl font-bold tracking-tight border-b border-border pb-2; }
+.prose-doc h3 { @apply mt-6 mb-2 text-lg font-semibold; }
+.prose-doc p, .prose-doc li { @apply leading-relaxed; }
+.prose-doc ul { @apply list-disc pl-5 space-y-1; }
+.prose-doc code { @apply rounded bg-elevated px-1 py-0.5 text-xs; }

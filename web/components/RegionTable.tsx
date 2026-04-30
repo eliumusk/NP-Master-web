@@ -9,28 +9,30 @@ type Region = {
   mibig_hits?: MibigHit[] | null;
 };
 
-const TYPE_COLOR: Record<string, string> = {
-  Alkaloid:   "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-200",
-  Terpene:    "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200",
-  NRP:        "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-200",
-  Polyketide: "bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-200",
-  RiPP:       "bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-200",
-  Saccharide: "bg-pink-100 text-pink-800 dark:bg-pink-950/60 dark:text-pink-200",
-  Other:      "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+// BGC type → Tailwind classes (using bgc.* tokens from tailwind.config.ts).
+// All seven keep the same HSL saturation/lightness so badges feel uniform.
+const TYPE_CLASS: Record<string, string> = {
+  Alkaloid:   "bg-bgc-alkaloid-soft   text-bgc-alkaloid-fg",
+  Terpene:    "bg-bgc-terpene-soft    text-bgc-terpene-fg",
+  NRP:        "bg-bgc-nrp-soft        text-bgc-nrp-fg",
+  Polyketide: "bg-bgc-polyketide-soft text-bgc-polyketide-fg",
+  RiPP:       "bg-bgc-ripp-soft       text-bgc-ripp-fg",
+  Saccharide: "bg-bgc-saccharide-soft text-bgc-saccharide-fg",
+  Other:      "bg-bgc-other-soft      text-bgc-other-fg",
 };
 
 function TypeBadge({ type }: { type: string | null | undefined }) {
-  if (!type) return <span className="text-slate-400">—</span>;
-  const cls = TYPE_COLOR[type] ?? TYPE_COLOR.Other;
+  if (!type) return <span className="text-fg-subtle">—</span>;
+  const cls = TYPE_CLASS[type] ?? TYPE_CLASS.Other;
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>
+    <span className={`inline-flex items-center rounded-pill px-2 py-0.5 text-xs font-medium ${cls}`}>
       {type}
     </span>
   );
 }
 
 function MibigCell({ hits }: { hits: MibigHit[] | null | undefined }) {
-  if (!hits || hits.length === 0) return <span className="text-slate-400">—</span>;
+  if (!hits || hits.length === 0) return <span className="text-fg-subtle">—</span>;
   const top = hits[0];
   const url = `https://mibig.secondarymetabolites.org/repository/${top.bgc_id}/`;
   return (
@@ -39,13 +41,13 @@ function MibigCell({ hits }: { hits: MibigHit[] | null | undefined }) {
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        className="font-mono text-xs text-indigo-600 hover:underline dark:text-indigo-400"
+        className="numeric-display text-xs text-brand hover:underline"
         title={top.product || top.bgc_id}
       >
         {top.bgc_id}
       </a>
-      <div className="text-[10px] tabular-nums text-slate-500">
-        {(top.identity * 100).toFixed(0)}% id
+      <div className="text-[10px] text-fg-muted">
+        <span className="numeric-display">{(top.identity * 100).toFixed(0)}%</span> id
         {top.product && <span className="ml-1 truncate">· {top.product.slice(0, 28)}</span>}
       </div>
     </div>
@@ -54,38 +56,53 @@ function MibigCell({ hits }: { hits: MibigHit[] | null | undefined }) {
 
 export function RegionTable({ regions }: { regions: Region[] }) {
   if (regions.length === 0) {
-    return <p className="text-sm text-slate-500">阈值上没有检出区域。</p>;
+    return (
+      <div className="rounded-card border border-dashed border-border bg-elevated/40 p-8 text-center">
+        <p className="text-sm text-fg-muted">阈值上没有检出区域。试试预设里"高召回"。</p>
+      </div>
+    );
   }
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
+    <div className="overflow-x-auto rounded-card border border-border">
       <table className="w-full text-sm">
-        <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-900/60">
+        <colgroup>
+          <col style={{ width: "3rem" }} />
+          <col style={{ width: "7rem" }} />
+          <col />
+          <col style={{ width: "7rem" }} />
+          <col style={{ width: "7rem" }} />
+          <col style={{ width: "6rem" }} />
+          <col style={{ width: "5rem" }} />
+          <col style={{ width: "6rem" }} />
+          <col style={{ width: "12rem" }} />
+        </colgroup>
+        <thead className="bg-elevated/60 text-left text-xs uppercase tracking-wider text-fg-muted">
           <tr>
-            <th className="px-3 py-2.5">#</th>
-            <th className="px-3 py-2.5">类型</th>
-            <th className="px-3 py-2.5">Contig</th>
-            <th className="px-3 py-2.5 text-right">Start</th>
-            <th className="px-3 py-2.5 text-right">End</th>
-            <th className="px-3 py-2.5 text-right">长度</th>
-            <th className="px-3 py-2.5 text-right">分数</th>
-            <th className="px-3 py-2.5 text-right">类型置信</th>
-            <th className="px-3 py-2.5">最相似已知簇</th>
+            <th className="px-3 py-3">#</th>
+            <th className="px-3 py-3">类型</th>
+            <th className="px-3 py-3">Contig</th>
+            <th className="px-3 py-3 text-right">Start</th>
+            <th className="px-3 py-3 text-right">End</th>
+            <th className="px-3 py-3 text-right">长度</th>
+            <th className="px-3 py-3 text-right">分数</th>
+            <th className="px-3 py-3 text-right">类型置信</th>
+            <th className="px-3 py-3">最相似已知簇</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+        <tbody className="divide-y divide-border">
           {regions.map((r, i) => (
-            <tr key={i} className="hover:bg-slate-50/60 dark:hover:bg-slate-900/40">
-              <td className="px-3 py-2.5 text-slate-500">{i + 1}</td>
-              <td className="px-3 py-2.5"><TypeBadge type={r.bgc_type} /></td>
-              <td className="px-3 py-2.5 font-mono text-xs">{r.contig}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{r.start_bp.toLocaleString()}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{r.end_bp.toLocaleString()}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{(r.end_bp - r.start_bp).toLocaleString()}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{r.score.toFixed(3)}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">
+            <tr key={i} className="even:bg-elevated/20 hover:bg-elevated/60">
+              <td className="numeric-display px-3 py-3 text-fg-muted">{i + 1}</td>
+              <td className="px-3 py-3"><TypeBadge type={r.bgc_type} /></td>
+              <td className="px-3 py-3 font-mono text-xs">{r.contig}</td>
+              <td className="numeric-display px-3 py-3 text-right text-sm">{r.start_bp.toLocaleString()}</td>
+              <td className="numeric-display px-3 py-3 text-right text-sm">{r.end_bp.toLocaleString()}</td>
+              <td className="numeric-display px-3 py-3 text-right text-sm">{(r.end_bp - r.start_bp).toLocaleString()}</td>
+              <td className="numeric-display px-3 py-3 text-right text-sm">{r.score.toFixed(3)}</td>
+              <td className="numeric-display px-3 py-3 text-right text-sm">
                 {r.type_score == null ? "—" : r.type_score.toFixed(3)}
               </td>
-              <td className="px-3 py-2.5"><MibigCell hits={r.mibig_hits ?? null} /></td>
+              <td className="px-3 py-3"><MibigCell hits={r.mibig_hits ?? null} /></td>
             </tr>
           ))}
         </tbody>

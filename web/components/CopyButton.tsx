@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 
 export function CopyButton({ value, label, className }: {
   value: string;
@@ -17,12 +18,13 @@ export function CopyButton({ value, label, className }: {
         try {
           await navigator.clipboard.writeText(value);
           setCopied(true);
+          toast.success(`已复制 ${label ?? "ID"}`);
           setTimeout(() => setCopied(false), 1500);
         } catch {
-          /* clipboard blocked */
+          toast.error("浏览器禁止访问剪贴板");
         }
       }}
-      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100 ${className ?? ""}`}
+      className={`inline-flex items-center gap-1 rounded-btn px-1.5 py-0.5 text-[11px] text-fg-muted transition-colors hover:bg-elevated hover:text-fg ${className ?? ""}`}
       aria-label={`复制 ${label ?? "ID"}`}
     >
       {copied ? (

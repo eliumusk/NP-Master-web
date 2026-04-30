@@ -34,14 +34,14 @@ export default async function JobsPage() {
       <div className="flex items-baseline justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">我的任务</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {user ? <>登录账号 <span className="text-slate-700 dark:text-slate-300">{user.email}</span> 下的全部任务。</>
+          <p className="mt-1 text-sm text-fg-muted">
+            {user ? <>登录账号 <span className="text-fg">{user.email}</span> 下的全部任务。</>
                   : "匿名访问，仅显示当前浏览器提交的任务。"}
           </p>
         </div>
         <Link
           href="/submit"
-          className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600"
+          className="inline-flex items-center gap-2 rounded-btn bg-brand px-4 py-2 text-sm font-medium text-brand-fg shadow-sm hover:opacity-90"
         >
           新建任务
         </Link>
