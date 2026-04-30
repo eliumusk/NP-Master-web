@@ -12,6 +12,26 @@ export function IgvBrowser({ fastaUrl, faiUrl, bedUrl }: Props) {
     let cancelled = false;
     (async () => {
       if (!ref.current) return;
+
+      // Fetch the BED first so we can land IGV on the first BGC region instead
+      // of the (often features-less) first contig in the FASTA.
+      let initialLocus: string | undefined;
+      try {
+        const bedText = await fetch(bedUrl).then((r) => r.text());
+        const firstLine = bedText.split(/\r?\n/).find((l) => l.trim() && !l.startsWith("#"));
+        if (firstLine) {
+          const cols = firstLine.split("\t");
+          if (cols.length >= 3) {
+            const contig = cols[0];
+            const start = Math.max(0, parseInt(cols[1], 10) - 5000);
+            const end = parseInt(cols[2], 10) + 5000;
+            initialLocus = `${contig}:${start}-${end}`;
+          }
+        }
+      } catch (e) {
+        console.warn("could not pre-fetch BED for initial locus:", e);
+      }
+
       const mod: any = await import("igv");
       const igv = mod.default ?? mod;
       if (typeof igv?.createBrowser !== "function") {
@@ -25,6 +45,7 @@ export function IgvBrowser({ fastaUrl, faiUrl, bedUrl }: Props) {
           indexURL: faiUrl,
           wholeGenomeView: false,
         },
+        locus: initialLocus,  // undefined → IGV's default (first contig)
         tracks: [
           {
             name: "BGC regions",
