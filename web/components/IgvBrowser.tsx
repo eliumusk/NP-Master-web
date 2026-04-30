@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Props = { fastaUrl: string; faiUrl: string; bedUrl: string; wigUrl?: string };
 
@@ -42,17 +42,21 @@ function loadIgv(): Promise<NonNullable<Window["igv"]>> {
 export function IgvBrowser({ fastaUrl, faiUrl, bedUrl, wigUrl }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const browserRef = useRef<unknown>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setError(null);
+
     (async () => {
       if (!ref.current) return;
 
-      // Land IGV on the first BGC region instead of the (possibly empty) first contig.
+      // Pre-fetch the BED so we can land on the first feature instead of the
+      // (often empty) first contig.
       let initialLocus: string | undefined;
       try {
         const bedText = await fetch(bedUrl).then((r) => r.text());
-        const firstLine = bedText.split(/\r?\n/).find((l) => l.trim() && !l.startsWith("#"));
+        const firstLine = bedText.split(/\r?\n/).find((l) => l.trim() && !l.startsWith("#") && !l.startsWith("track"));
         if (firstLine) {
           const cols = firstLine.split("\t");
           if (cols.length >= 3) {
@@ -68,39 +72,70 @@ export function IgvBrowser({ fastaUrl, faiUrl, bedUrl, wigUrl }: Props) {
 
       const igv = await loadIgv();
       if (cancelled || !ref.current) return;
-      const browser = await igv.createBrowser(ref.current, {
-        reference: {
-          id: "user_genome",
-          fastaURL: fastaUrl,
-          indexURL: faiUrl,
-          wholeGenomeView: false,
+
+      // Build tracks list. Critical to keep BED first so a wig failure can
+      // never strip out the regions.
+      const tracks: any[] = [
+        {
+          name: "BGC regions",
+          type: "annotation",
+          format: "bed",
+          url: bedUrl,
+          displayMode: "EXPANDED",
         },
-        locus: initialLocus,
-        tracks: [
-          ...(wigUrl ? [{
-            name: "BGC score (per-bp)",
-            type: "wig",
-            format: "bedgraph",
-            url: wigUrl,
-            min: 0,
-            max: 1,
-            color: "rgb(99, 102, 241)",
-            altColor: "rgb(199, 210, 254)",
-            height: 60,
-            autoscale: false,
-          }] : []),
-          {
-            name: "BGC regions",
-            type: "annotation",
-            format: "bed",
-            url: bedUrl,
-            displayMode: "EXPANDED",
+      ];
+      if (wigUrl) {
+        tracks.push({
+          name: "BGC score",
+          type: "wig",
+          format: "bedGraph",     // camelCase matches the in-file `track type=bedGraph` header
+          url: wigUrl,
+          height: 50,
+          min: 0,
+          max: 1,
+          color: "#6366F1",
+        });
+      }
+
+      try {
+        const browser = await igv.createBrowser(ref.current, {
+          reference: {
+            id: "user_genome",
+            fastaURL: fastaUrl,
+            indexURL: faiUrl,
+            wholeGenomeView: false,
           },
-        ],
-      });
-      browserRef.current = browser;
+          locus: initialLocus,
+          tracks,
+        });
+        browserRef.current = browser;
+      } catch (e: any) {
+        // If the wig track is what's breaking igv, retry without it so the
+        // user at least sees the regions.
+        if (wigUrl) {
+          console.warn("igv create failed with wig, retrying without:", e);
+          try {
+            const browser = await igv.createBrowser(ref.current, {
+              reference: {
+                id: "user_genome",
+                fastaURL: fastaUrl,
+                indexURL: faiUrl,
+                wholeGenomeView: false,
+              },
+              locus: initialLocus,
+              tracks: tracks.filter((t) => t.format !== "bedGraph"),
+            });
+            browserRef.current = browser;
+            return;
+          } catch (e2) {
+            console.error("igv retry without wig also failed:", e2);
+          }
+        }
+        throw e;
+      }
     })().catch((e) => {
       console.error("igv init failed:", e);
+      setError(e?.message ?? String(e));
     });
 
     return () => {
@@ -112,5 +147,17 @@ export function IgvBrowser({ fastaUrl, faiUrl, bedUrl, wigUrl }: Props) {
     };
   }, [fastaUrl, faiUrl, bedUrl, wigUrl]);
 
-  return <div ref={ref} className="w-full overflow-hidden rounded-md border border-slate-200 dark:border-slate-800" />;
+  return (
+    <div className="space-y-2">
+      <div
+        ref={ref}
+        className="min-h-[300px] w-full overflow-hidden rounded-card border border-border bg-surface"
+      />
+      {error && (
+        <p className="text-xs text-rose-600">
+          IGV 加载失败: {error}（数据已写入 Storage，CSV / BED / GenBank 都可正常下载）
+        </p>
+      )}
+    </div>
+  );
 }

@@ -34,7 +34,7 @@ function TypeBadge({ type }: { type: string | null | undefined }) {
 function MibigCell({ hits }: { hits: MibigHit[] | null | undefined }) {
   if (!hits || hits.length === 0) return <span className="text-fg-subtle">—</span>;
   const top = hits[0];
-  const url = `https://mibig.secondarymetabolites.org/repository/${top.bgc_id}/`;
+  const url = `https://mibig.secondarymetabolites.org/cluster/${top.bgc_id}`;
   return (
     <div className="space-y-0.5">
       <a
