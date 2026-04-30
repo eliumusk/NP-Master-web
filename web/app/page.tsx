@@ -1,16 +1,22 @@
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import { LandingSubmit } from "@/components/LandingSubmit";
 import { PipelineDiagram } from "@/components/PipelineDiagram";
 
 const EXAMPLE_JOB_ID = process.env.NEXT_PUBLIC_EXAMPLE_JOB_ID || "";
 
-export default function Page() {
+export default async function Page() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const isLoggedIn = !!user;
+
   return (
     <div className="space-y-section">
-      {/* ─── Hero ─── */}
-      <section className="grid items-center gap-12 lg:grid-cols-[3fr_2fr]">
-        <div className="space-y-6">
+      {/* ─── Hero (left text · right inline submit) ─── */}
+      <section className="grid items-start gap-10 lg:grid-cols-[3fr_2fr]">
+        <div className="space-y-6 pt-6">
           <div className="inline-flex items-center gap-2 rounded-pill border border-border bg-elevated px-3 py-1 text-xs font-medium text-fg-muted">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand" />
+            <span className="inline-block h-1.5 w-1.5 rounded-pill bg-brand" />
             Powered by Evo2 7B · 16-GPU 并行 · MIBiG 4.0
           </div>
           <h1 className="text-balance text-4xl font-bold leading-tight tracking-tight sm:text-5xl lg:text-6xl">
@@ -20,28 +26,18 @@ export default function Page() {
           <p className="max-w-xl text-balance text-lg text-fg-muted">
             基于基因组语言模型的下一代 BGC 发现平台。上传细菌基因组 FASTA，几分钟内得到候选区域、产物类型、与 MIBiG 已知簇的最近邻比对，以及 IGV 可视化结果。
           </p>
-          <div className="flex flex-wrap items-center gap-4">
-            <Link
-              href="/submit"
-              className="inline-flex items-center gap-2 rounded-btn bg-brand px-5 py-2.5 text-sm font-medium text-brand-fg shadow-sm transition-all hover:opacity-90 hover:shadow"
-            >
-              提交一个基因组
-              <ArrowRight />
-            </Link>
-            {EXAMPLE_JOB_ID && (
-              <Link
-                href={`/jobs/${EXAMPLE_JOB_ID}`}
-                className="text-sm font-medium text-fg-muted transition-colors hover:text-fg"
-              >
-                查看示例结果 →
+          {EXAMPLE_JOB_ID && (
+            <div className="text-sm">
+              <Link href={`/jobs/${EXAMPLE_JOB_ID}`} className="font-medium text-fg-muted transition-colors hover:text-fg">
+                没有 FASTA？查看示例结果 →
               </Link>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
-        {/* Right column: pipeline schematic */}
-        <div className="hidden lg:block">
-          <PipelineDiagram className="h-auto w-full text-fg drop-shadow-sm" />
+        {/* Right column: inline submit */}
+        <div className="lg:sticky lg:top-20">
+          <LandingSubmit isLoggedIn={isLoggedIn} />
         </div>
       </section>
 
@@ -55,25 +51,23 @@ export default function Page() {
         </div>
       </section>
 
-      {/* ─── Workflow ─── */}
-      <section className="space-y-8">
-        <div>
+      {/* ─── Pipeline schematic + workflow ─── */}
+      <section className="grid items-center gap-8 lg:grid-cols-[5fr_4fr]">
+        <div className="space-y-6">
           <h2 className="text-3xl font-bold tracking-tight">三步出结果</h2>
-          <p className="mt-2 text-sm text-fg-muted">
+          <p className="text-sm text-fg-muted">
             首次冷启动 5 分钟以内，重复同一基因组（缓存命中）30 秒。
           </p>
+          <ol className="space-y-5">
+            <Step n="1" title="上传 FASTA">支持 .fasta / .fna / .fa，或直接输入 NCBI accession。匿名也可提交。</Step>
+            <Step n="2" title="GPU 并行分析">16 张 A800 并行抽 Evo2 7B 特征 · 1D U-Net 检测 · LR 头 7 类分类 · DIAMOND 比对 MIBiG 4.0。</Step>
+            <Step n="3" title="交互式可视化">区域表 · IGV 浏览器 · CSV / BED / GenBank / FASTA / Score Track 一键下载。</Step>
+          </ol>
         </div>
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Step n="1" title="上传 FASTA"
-                body="支持 .fasta / .fna / .fa，单文件 ≤ 50 MB。或直接输入 NCBI accession 让平台拉取。匿名也可提交。" />
-          <Step n="2" title="GPU 并行分析"
-                body="后端 16 张 A800 并行抽 Evo2 7B 特征，1D U-Net 给出 BGC 区域，LR 头给出 7 类产物概率，DIAMOND 比对 MIBiG 4.0。" />
-          <Step n="3" title="交互式可视化"
-                body="区域表 · IGV 浏览器（per-bp 分数 + 按类型上色的区域）· CSV / BED / GenBank / FASTA 一键下载。" />
-        </div>
+        <PipelineDiagram className="h-auto w-full text-fg drop-shadow-sm" />
       </section>
 
-      {/* ─── How it works (折叠技术细节) ─── */}
+      {/* ─── 折叠技术细节 ─── */}
       <section>
         <details className="group rounded-card border border-border bg-elevated/40 p-6 open:bg-elevated/70">
           <summary className="flex cursor-pointer list-none items-center justify-between text-base font-semibold">
@@ -110,15 +104,17 @@ function Stat({ label, value, hint }: { label: string; value: string; hint: stri
   );
 }
 
-function Step({ n, title, body }: { n: string; title: string; body: string }) {
+function Step({ n, title, children }: { n: string; title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-card border border-border bg-surface p-6">
-      <div className="numeric-display mb-3 inline-flex h-9 w-9 items-center justify-center rounded-pill bg-brand-soft text-base font-semibold text-brand">
+    <li className="flex gap-4">
+      <div className="numeric-display flex h-8 w-8 shrink-0 items-center justify-center rounded-pill bg-brand-soft text-sm font-semibold text-brand">
         {n}
       </div>
-      <h3 className="text-base font-semibold text-fg">{title}</h3>
-      <p className="mt-2 text-sm leading-relaxed text-fg-muted">{body}</p>
-    </div>
+      <div>
+        <h3 className="text-base font-semibold text-fg">{title}</h3>
+        <p className="mt-1 text-sm leading-relaxed text-fg-muted">{children}</p>
+      </div>
+    </li>
   );
 }
 
@@ -128,13 +124,5 @@ function Cell({ title, children }: { title: string; children: React.ReactNode })
       <h3 className="text-sm font-semibold text-fg">{title}</h3>
       <p className="mt-1 leading-relaxed">{children}</p>
     </div>
-  );
-}
-
-function ArrowRight() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M5 12h14m0 0l-6-6m6 6l-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   );
 }
