@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/data/syh/NP-Master-web
-EnvironmentFile=/data/syh/NP-Master-web/serve/.env
-ExecStart=/data/syh/NP-Master-web/.venv-serve/bin/python -m serve.worker
+WorkingDirectory=/data/muskliu/npmaster
+EnvironmentFile=/data/muskliu/npmaster/serve/.env
+ExecStart=/data/muskliu/npmaster/.venv-serve/bin/python -m serve.worker
 Restart=on-failure
 RestartSec=15
 Nice=10

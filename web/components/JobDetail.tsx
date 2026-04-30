@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { JobStatusBadge } from "./JobStatusBadge";
 import { RegionTable } from "./RegionTable";
 import { IgvBrowser } from "./IgvBrowser";
+import { CopyButton } from "./CopyButton";
 
 type Job = {
   id: string;
@@ -27,6 +28,7 @@ type Job = {
 type Region = {
   contig: string; start_bp: number; end_bp: number; score: number;
   bgc_type?: string | null; type_score?: number | null;
+  mibig_hits?: { bgc_id: string; identity: number; product?: string }[] | null;
 };
 
 export function JobDetail({
@@ -34,7 +36,7 @@ export function JobDetail({
 }: { initialJob: Job; initialRegions: Region[]; isExample?: boolean }) {
   const [job, setJob] = useState<Job>(initialJob);
   const [regions, setRegions] = useState<Region[]>(initialRegions);
-  const [urls, setUrls] = useState<{ fasta?: string; fai?: string; bed?: string; csv?: string }>({});
+  const [urls, setUrls] = useState<{ fasta?: string; fai?: string; bed?: string; csv?: string; gbk?: string; wig?: string }>({});
 
   useEffect(() => {
     const supabase = createClient();
@@ -54,13 +56,20 @@ export function JobDetail({
     if (job.status !== "done") return;
     if (urls.bed) return;
     (async () => {
-      const kinds = ["fasta", "fai", "bed", "csv"] as const;
-      const out: Partial<Record<(typeof kinds)[number], string>> = {};
-      for (const k of kinds) {
+      const required = ["fasta", "fai", "bed", "csv"] as const;
+      const optional = ["gbk", "wig"] as const;
+      const out: Record<string, string> = {};
+      for (const k of required) {
         const r = await fetch(`/api/jobs/${job.id}/signed-url?kind=${k}`);
         if (!r.ok) return;
         const j = await r.json();
         out[k] = j.url as string;
+      }
+      for (const k of optional) {
+        try {
+          const r = await fetch(`/api/jobs/${job.id}/signed-url?kind=${k}`);
+          if (r.ok) out[k] = (await r.json()).url as string;
+        } catch { /* optional */ }
       }
       setUrls(out);
     })().catch((e) => console.error(e));
@@ -79,8 +88,9 @@ export function JobDetail({
     <div className="space-y-8">
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
             任务 <span className="font-mono text-base text-slate-500">{job.id.slice(0, 8)}</span>
+            <CopyButton value={job.id} label="完整 ID" />
           </h1>
           <JobStatusBadge status={job.status} />
           {isExample && (
@@ -139,7 +149,9 @@ export function JobDetail({
           <div className="flex flex-wrap gap-2">
             {urls.csv && <DownloadBtn href={urls.csv} label="下载 CSV" />}
             {urls.bed && <DownloadBtn href={urls.bed} label="下载 BED" />}
+            {urls.gbk && <DownloadBtn href={urls.gbk} label="下载 GenBank" />}
             {urls.fasta && <DownloadBtn href={urls.fasta} label="下载 FASTA" />}
+            {urls.wig && <DownloadBtn href={urls.wig} label="下载 Score Track" />}
           </div>
 
           {/* Regions table */}
@@ -155,7 +167,12 @@ export function JobDetail({
               <p className="text-xs text-slate-500">
                 自动定位到第一个 BGC 区域。可直接在轨道上拖动、缩放，或在顶部坐标框输入位置（例：<code className="rounded bg-slate-100 px-1 dark:bg-slate-800">contig:start-end</code>）。
               </p>
-              <IgvBrowser fastaUrl={urls.fasta} faiUrl={urls.fai} bedUrl={urls.bed} />
+              <div className="block sm:hidden rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                IGV 浏览器在大屏上效果最佳。手机上可查看下载文件 + 区域表格。
+              </div>
+              <div className="hidden sm:block">
+                <IgvBrowser fastaUrl={urls.fasta} faiUrl={urls.fai} bedUrl={urls.bed} wigUrl={urls.wig} />
+              </div>
             </section>
           )}
         </>

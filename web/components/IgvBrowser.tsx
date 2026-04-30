@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
-type Props = { fastaUrl: string; faiUrl: string; bedUrl: string };
+type Props = { fastaUrl: string; faiUrl: string; bedUrl: string; wigUrl?: string };
 
 declare global {
   interface Window {
@@ -39,7 +39,7 @@ function loadIgv(): Promise<NonNullable<Window["igv"]>> {
   });
 }
 
-export function IgvBrowser({ fastaUrl, faiUrl, bedUrl }: Props) {
+export function IgvBrowser({ fastaUrl, faiUrl, bedUrl, wigUrl }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const browserRef = useRef<unknown>(null);
 
@@ -77,6 +77,18 @@ export function IgvBrowser({ fastaUrl, faiUrl, bedUrl }: Props) {
         },
         locus: initialLocus,
         tracks: [
+          ...(wigUrl ? [{
+            name: "BGC score (per-bp)",
+            type: "wig",
+            format: "bedgraph",
+            url: wigUrl,
+            min: 0,
+            max: 1,
+            color: "rgb(99, 102, 241)",
+            altColor: "rgb(199, 210, 254)",
+            height: 60,
+            autoscale: false,
+          }] : []),
           {
             name: "BGC regions",
             type: "annotation",
@@ -98,7 +110,7 @@ export function IgvBrowser({ fastaUrl, faiUrl, bedUrl }: Props) {
       browserRef.current = null;
       if (ref.current) ref.current.innerHTML = "";
     };
-  }, [fastaUrl, faiUrl, bedUrl]);
+  }, [fastaUrl, faiUrl, bedUrl, wigUrl]);
 
   return <div ref={ref} className="w-full overflow-hidden rounded-md border border-slate-200 dark:border-slate-800" />;
 }

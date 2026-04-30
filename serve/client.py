@@ -75,11 +75,14 @@ def _opt_str(v: Any) -> str | None:
 
 
 @_retry
-def insert_regions(supa: Client, job_id: str, rows: list[dict[str, Any]]) -> None:
+def insert_regions(supa: Client, job_id: str, rows: list[dict[str, Any]],
+                   mibig_hits_by_index: dict[int, list[dict]] | None = None) -> None:
+    """Insert rows; optionally attach MIBiG nearest-neighbor hits keyed by 1-based row index."""
     if not rows:
         return
-    payload = [
-        {
+    payload = []
+    for i, r in enumerate(rows, start=1):
+        item = {
             "job_id": job_id,
             "contig": r["contig"],
             "start_bp": int(r["start"]),
@@ -88,9 +91,9 @@ def insert_regions(supa: Client, job_id: str, rows: list[dict[str, Any]]) -> Non
             "bgc_type": _opt_str(r.get("v4_1_type")),
             "type_score": _opt_float(r.get("v4_1_type_score")),
         }
-        for r in rows
-    ]
-    # Batch in chunks of 500 to keep request size sane.
+        if mibig_hits_by_index and i in mibig_hits_by_index:
+            item["mibig_hits"] = mibig_hits_by_index[i]
+        payload.append(item)
     for i in range(0, len(payload), 500):
         supa.table("regions").insert(payload[i : i + 500]).execute()
 

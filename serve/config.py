@@ -34,6 +34,22 @@ class Settings(BaseSettings):
         default=Path("/data/muskliu/npmaster/data/evo2_lr_multiscale/type_lr"),
         alias="LR_TYPE_CKPT_DIR",
     )
+    prodigal_bin: Path = Field(
+        default=Path("/root/miniconda3/envs/bgc/bin/prodigal"),
+        alias="PRODIGAL_BIN",
+    )
+    diamond_bin: Path = Field(
+        default=Path("/root/miniconda3/envs/bgc/bin/diamond"),
+        alias="DIAMOND_BIN",
+    )
+    mibig_dmnd_path: Path = Field(
+        default=Path("/data/syh/NP-Master-web/data/mibig/mibig.dmnd"),
+        alias="MIBIG_DMND_PATH",
+    )
+    mibig_meta_path: Path = Field(
+        default=Path("/data/syh/NP-Master-web/data/mibig/mibig_meta.json"),
+        alias="MIBIG_META_PATH",
+    )
     default_threshold: float = Field(default=0.50, alias="DEFAULT_THRESHOLD")
     default_min_len_bp: int = Field(default=2000, alias="DEFAULT_MIN_LEN_BP")
     upsample_k: int = Field(default=8, alias="UPSAMPLE_K")

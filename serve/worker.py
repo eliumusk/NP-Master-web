@@ -54,18 +54,21 @@ def _process_one_job(supa, settings, job: dict) -> None:
     hb.start()
     try:
         result = run_job(supa, settings, job)
-        update_job(
-            supa,
-            job_id,
-            status="done",
-            finished_at="now()",
-            error=None,
-            log_tail=f"done; {result['n_regions']} regions",
-            result_csv_path=result["result_csv_path"],
-            result_bed_path=result["result_bed_path"],
-            result_fai_path=result["result_fai_path"],
-            result_fasta_path=result["result_fasta_path"],
-        )
+        update_fields = {
+            "status": "done",
+            "finished_at": "now()",
+            "error": None,
+            "log_tail": f"done; {result['n_regions']} regions",
+            "result_csv_path": result["result_csv_path"],
+            "result_bed_path": result["result_bed_path"],
+            "result_fai_path": result["result_fai_path"],
+            "result_fasta_path": result["result_fasta_path"],
+        }
+        if result.get("result_gbk_path"):
+            update_fields["result_gbk_path"] = result["result_gbk_path"]
+        if result.get("result_wig_path"):
+            update_fields["result_wig_path"] = result["result_wig_path"]
+        update_job(supa, job_id, **update_fields)
         log.info("job %s done (%d regions)", job_id, result["n_regions"])
     except GpuBusyTimeout as e:
         update_job(supa, job_id, status="failed", finished_at="now()", error=f"gpu busy timeout: {e}")

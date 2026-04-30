@@ -282,24 +282,89 @@ def run_job(supa: Any, settings: Settings, job: dict[str, Any]) -> dict[str, Any
     fai_path = results_dir / "input.fasta.fai"
     write_faidx(fasta_path, fai_path)
 
+    # Build a binned bedgraph of per-nucleotide BGC scores for IGV multi-track.
+    wig_path = results_dir / "scores.bedgraph"
+    try:
+        from .score_track import write_bedgraph
+        probs_npz = probs_dir / f"{stem}.probs.npz"
+        coords_csv = probs_dir / f"{stem}.coords.csv"
+        write_bedgraph(probs_npz=probs_npz, coords_csv=coords_csv, out_path=wig_path)
+    except Exception as e:
+        log.warning("score_track generation failed (non-fatal): %s", e)
+        wig_path = None  # type: ignore[assignment]
+
+    # Generate GenBank with prodigal CDS calls (one LOCUS per region).
+    gbk_path = results_dir / "regions.gbk"
+    update_job(supa, job_id, log_tail="generating GenBank (prodigal CDS)")
+    try:
+        from .genbank import generate_genbank
+        generate_genbank(
+            fasta_path=fasta_path, regions_csv=csv_path,
+            out_gbk_path=gbk_path, prodigal_bin=settings.prodigal_bin,
+            work_dir=results_dir / "_genbank_work",
+        )
+    except Exception as e:
+        log.warning("genbank generation failed (non-fatal): %s", e)
+        gbk_path = None  # type: ignore[assignment]
+
+    # MIBiG nearest-neighbor: blastp region CDS proteins against MIBiG 4.0.
+    # Returns {region_name -> [hit_dict, ...]} where region_name = "BGC_NNNN".
+    mibig_hits: dict[str, list[dict]] = {}
+    if gbk_path and gbk_path.exists() and settings.mibig_dmnd_path.exists():
+        update_job(supa, job_id, log_tail="comparing against MIBiG known clusters")
+        try:
+            from .mibig import search_regions_against_mibig
+            mibig_hits = search_regions_against_mibig(
+                regions_gbk=gbk_path,
+                dmnd_db=settings.mibig_dmnd_path,
+                meta_json=settings.mibig_meta_path,
+                work_dir=results_dir / "_mibig_work",
+                diamond_bin=settings.diamond_bin,
+                top_k=3,
+            )
+            log.info("mibig: %d/%d regions have hits", len(mibig_hits), n_regions)
+        except Exception as e:
+            log.warning("mibig search failed (non-fatal): %s", e)
+            mibig_hits = {}
+    else:
+        log.info("mibig: skipped (db missing or gbk missing)")
+
+    # Convert {region_name -> hits} to {1-based-index -> hits} for insert_regions.
+    mibig_hits_by_index: dict[int, list[dict]] = {}
+    for name, hits in mibig_hits.items():
+        # name format: "BGC_NNNN"
+        try:
+            idx = int(name.split("_")[1])
+            mibig_hits_by_index[idx] = hits
+        except (IndexError, ValueError):
+            pass
+
     update_job(supa, job_id, log_tail=f"uploading results ({n_regions} regions)")
     csv_key = f"{job_id}/regions.csv"
     bed_key = f"{job_id}/regions.bed"
     fai_key = f"{job_id}/input.fasta.fai"
     fasta_key = f"{job_id}/input.fasta"
+    gbk_key = f"{job_id}/regions.gbk"
+    wig_key = f"{job_id}/scores.bedgraph"
     upload_object(supa, settings.results_bucket, csv_key, csv_path, "text/csv")
     upload_object(supa, settings.results_bucket, bed_key, bed_path, "text/plain")
     upload_object(supa, settings.results_bucket, fai_key, fai_path, "text/plain")
     upload_object(supa, settings.results_bucket, fasta_key, fasta_path, "text/plain")
+    if gbk_path and gbk_path.exists():
+        upload_object(supa, settings.results_bucket, gbk_key, gbk_path, "text/plain")
+    if wig_path and wig_path.exists():
+        upload_object(supa, settings.results_bucket, wig_key, wig_path, "text/plain")
 
     with open(csv_path, newline="") as fh:
         rows = list(csv.DictReader(fh))
-    insert_regions(supa, job_id, rows)
+    insert_regions(supa, job_id, rows, mibig_hits_by_index=mibig_hits_by_index)
 
     return {
         "result_csv_path": csv_key,
         "result_bed_path": bed_key,
         "result_fai_path": fai_key,
         "result_fasta_path": fasta_key,
+        "result_gbk_path": gbk_key if (gbk_path and gbk_path.exists()) else None,
+        "result_wig_path": wig_key if (wig_path and wig_path.exists()) else None,
         "n_regions": n_regions,
     }

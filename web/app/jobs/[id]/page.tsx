@@ -30,7 +30,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
   const { data: regions } = await admin
     .from("regions")
-    .select("contig,start_bp,end_bp,score,bgc_type,type_score")
+    .select("contig,start_bp,end_bp,score,bgc_type,type_score,mibig_hits")
     .eq("job_id", id)
     .order("score", { ascending: false });
 

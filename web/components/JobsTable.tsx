@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { JobStatusBadge } from "./JobStatusBadge";
+import { CopyButton } from "./CopyButton";
+import { CopyButton } from "./CopyButton";
 
 type Job = {
   id: string;
@@ -120,9 +122,12 @@ export function JobsTable({
                 <tr key={j.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-900/40">
                   <td className="px-4 py-2.5"><JobStatusBadge status={j.status} /></td>
                   <td className="px-4 py-2.5">
-                    <Link href={`/jobs/${j.id}`} className="font-mono text-xs text-indigo-600 hover:underline dark:text-indigo-400">
-                      {j.id.slice(0, 8)}
-                    </Link>
+                    <div className="flex items-center gap-1">
+                      <Link href={`/jobs/${j.id}`} className="font-mono text-xs text-indigo-600 hover:underline dark:text-indigo-400">
+                        {j.id.slice(0, 8)}
+                      </Link>
+                      <CopyButton value={j.id} label="job ID" />
+                    </div>
                     {j.error && <div className="mt-0.5 truncate text-xs text-rose-500">{j.error.slice(0, 80)}</div>}
                   </td>
                   <td className="px-4 py-2.5 tabular-nums text-xs text-slate-600 dark:text-slate-400">

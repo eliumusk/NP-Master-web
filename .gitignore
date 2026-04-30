@@ -20,3 +20,9 @@ serve/.env
 # Worker scratch
 cache/
 *.log
+
+# Local data caches (should not be in git)
+cache/
+data/
+serve/.env
+.venv-serve/

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { readServerClientId } from "@/lib/server-client-id";
 
-const ALLOWED = new Set(["csv", "bed", "fai", "fasta"]);
+const ALLOWED = new Set(["csv", "bed", "fai", "fasta", "gbk", "wig"]);
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { data: job, error } = await admin
     .from("jobs")
-    .select("user_id,client_id,is_example,result_csv_path,result_bed_path,result_fai_path,result_fasta_path,status")
+    .select("user_id,client_id,is_example,result_csv_path,result_bed_path,result_fai_path,result_fasta_path,result_gbk_path,result_wig_path,status")
     .eq("id", id)
     .maybeSingle();
   if (error || !job) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -30,9 +30,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!ok) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const key =
-    kind === "csv" ? job.result_csv_path :
-    kind === "bed" ? job.result_bed_path :
-    kind === "fai" ? job.result_fai_path :
+    kind === "csv"   ? job.result_csv_path :
+    kind === "bed"   ? job.result_bed_path :
+    kind === "fai"   ? job.result_fai_path :
+    kind === "gbk"   ? job.result_gbk_path :
+    kind === "wig"   ? job.result_wig_path :
     job.result_fasta_path;
   if (!key) return NextResponse.json({ error: `result not yet available (${kind})` }, { status: 409 });
 
