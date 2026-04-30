@@ -12,7 +12,11 @@ export function IgvBrowser({ fastaUrl, faiUrl, bedUrl }: Props) {
     let cancelled = false;
     (async () => {
       if (!ref.current) return;
-      const igv = (await import("igv")).default;
+      const mod: any = await import("igv");
+      const igv = mod.default ?? mod;
+      if (typeof igv?.createBrowser !== "function") {
+        throw new Error("igv.createBrowser not found; package shape unexpected");
+      }
       if (cancelled || !ref.current) return;
       const browser = await igv.createBrowser(ref.current, {
         reference: {
