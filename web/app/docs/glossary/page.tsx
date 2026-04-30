@@ -20,7 +20,9 @@ export default function GlossaryPage() {
   );
 }
 
-const TERMS = [
+type Term = { term: string; full?: string; def: string };
+
+const TERMS: readonly Term[] = [
   { term: "BGC", full: "Biosynthetic Gene Cluster", def: "生物合成基因簇。在基因组上空间共定位、协同表达、共同合成一个次级代谢产物的一组基因。" },
   { term: "NRPS", full: "Non-Ribosomal Peptide Synthetase", def: "非核糖体肽合成酶。模块化大酶，逐一加入氨基酸 / 类似单体合成肽链。代表产物：青霉素、万古霉素、依替米星。" },
   { term: "PKS", full: "Polyketide Synthase", def: "聚酮合成酶。逐步缩合丙二酰 CoA 单体，合成聚酮主链。分 type I (模块化) / II (迭代) / III (单体酶)。代表产物：红霉素、放线菌素、阿霉素。" },
