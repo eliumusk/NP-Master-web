@@ -23,7 +23,11 @@ from .client import (
 from .config import Settings
 from .fasta import csv_regions_to_bed, sha256_file, validate_fasta, write_faidx
 from .gpu_guard import wait_for_gpu
-from .parallel_extract import run_parallel as _run_parallel_extract
+from .parallel_extract import (
+    run_parallel as _run_parallel_extract,
+    run_parallel_lr as _run_parallel_lr,
+    walk_fasta_to_metadata as _walk_fasta_to_metadata,
+)
 
 log = logging.getLogger(__name__)
 
@@ -217,21 +221,63 @@ def run_job(supa: Any, settings: Settings, job: dict[str, Any]) -> dict[str, Any
     _infer(settings, features_dir, probs_dir, stem)
 
     results_dir = cache / "results" / job_id
-    csv_path = results_dir / "regions.csv"
+    raw_csv = results_dir / "regions_raw.csv"
     update_job(supa, job_id, log_tail="decoding regions")
-    _decode(settings, probs_dir, csv_path, threshold, min_len_bp)
+    _decode(settings, probs_dir, raw_csv, threshold, min_len_bp)
 
-    # NOTE: BGC type classification is staged but disabled until 4096-dim
-    # features are available. The current pipeline produces 128-dim projected
-    # features (from R: 4096→128, fixed projection seed) but the LR type
-    # classifier was trained on raw 4096-dim Evo2 hidden states. Re-extracting
-    # at 4096-dim costs another full Evo2 pass; we'll wire it back in once
-    # Fix 3 (16-GPU parallel) brings the cost down. Until then, regions land
-    # with bgc_type = NULL.
+    # ── Type classification (4096-dim mean-pool LR head) ─────────────────
+    # Run a second, projection-free Evo2 pass on the same FASTA to feed the
+    # 7-class LR. Cached by sha256 in cache/features_lr/<sha>/.
+    update_job(supa, job_id, log_tail="extracting 4096-dim features for type classifier")
+    lr_emb_dir = cache / "features_lr" / sha
+    lr_done_marker = lr_emb_dir / "DONE"
+    hosts = [h.strip() for h in settings.extract_hosts.split(",") if h.strip()]
+    if not lr_done_marker.exists():
+        # Need a windows_metadata.csv. Reuse the per-token metadata if available;
+        # otherwise re-walk the FASTA (cheap).
+        per_token_meta = features_dir / "_meta" / "windows_metadata.csv"
+        if per_token_meta.exists():
+            metadata_csv = per_token_meta
+        else:
+            metadata_csv = lr_emb_dir / "windows_metadata.csv"
+            metadata_csv.parent.mkdir(parents=True, exist_ok=True)
+            _walk_fasta_to_metadata(
+                fasta_path, metadata_csv,
+                window=settings.extract_window, stride=settings.extract_stride,
+                stem=stem,
+            )
+        if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
+            raise GpuBusyTimeout("gpu busy timeout before lr-extract")
+        n_lr = _run_parallel_lr(
+            fasta_path=fasta_path,
+            metadata_csv=metadata_csv,
+            emb_dir=lr_emb_dir,
+            stem=stem,
+            work_dir=lr_emb_dir / "_work",
+            serve_root=Path(__file__).resolve().parent,
+            npmaster_root=settings.npmaster_repo_root,
+            python_bin=settings.python_bin,
+            torch_lib=_torch_lib_for(settings.python_bin),
+            hosts=hosts,
+            gpus_per_host=settings.extract_gpus_per_host,
+        )
+        lr_done_marker.touch()
+        log.info("lr-extract: %d windows × 4096 dims cached at %s", n_lr, lr_emb_dir)
+    else:
+        log.info("lr-extract cache hit for sha=%s", sha[:8])
+
+    # ── Apply per-region 7-class LR classifier ───────────────────────────
+    # The classifier writes the same regions back with v4_1_type / score columns.
+    # Note: regions.csv `genome` field must match the emb_dir filename prefix.
+    # Our regions are emitted with genome=stem; emb files are <stem>_*.npy/.csv.
+    # Already aligned by construction.
+    csv_path = results_dir / "regions.csv"
+    update_job(supa, job_id, log_tail="classifying BGC types")
+    _classify(settings, raw_csv, lr_emb_dir, csv_path)
 
     bed_path = results_dir / "regions.bed"
     n_regions = csv_regions_to_bed(csv_path, bed_path)
-    log.info("decoded %d regions", n_regions)
+    log.info("decoded + typed %d regions", n_regions)
 
     fai_path = results_dir / "input.fasta.fai"
     write_faidx(fasta_path, fai_path)

@@ -168,6 +168,127 @@ def _merge_into_one_dir(specs: list[WorkerSpec], features_dir: Path, stem: str) 
     return n_parts
 
 
+def _build_lr_cmd(spec: WorkerSpec, *, fasta_path: Path, metadata_csv: Path,
+                  out_prefix: Path, serve_root: Path, python_bin: Path,
+                  npmaster_root: Path, torch_lib: str) -> list[str]:
+    """Build cmd for the LR mean-pool 4096-d worker (one per GPU)."""
+    inner = (
+        f"cd {shlex.quote(str(serve_root.parent))} && "
+        f"CUDA_VISIBLE_DEVICES={spec.cuda_device} "
+        f"NPMASTER_REPO_ROOT={shlex.quote(str(npmaster_root))} "
+        f"LD_LIBRARY_PATH={shlex.quote(torch_lib)}:${{LD_LIBRARY_PATH:-}} "
+        f"PYTHONPATH={shlex.quote(str(serve_root.parent))}:${{PYTHONPATH:-}} "
+        f"{shlex.quote(str(python_bin))} -m serve.lr_extract_worker "
+        f"--fasta {shlex.quote(str(fasta_path))} "
+        f"--metadata-csv {shlex.quote(str(metadata_csv))} "
+        f"--window-ids-subset {shlex.quote(str(spec.subset_txt))} "
+        f"--out-prefix {shlex.quote(str(out_prefix))}"
+    )
+    if spec.host == "localhost":
+        return ["bash", "-c", inner]
+    return ["ssh", "-o", "BatchMode=yes", spec.host, inner]
+
+
+def _concat_lr_outputs(specs: list[WorkerSpec], out_dir: Path, stem: str) -> int:
+    """Concatenate per-worker LR outputs into <stem>_embeddings.npy + _windows.csv."""
+    import numpy as np
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    parts: list[tuple[Path, Path]] = []
+    for spec in specs:
+        prefix = spec.out_subdir / "lr"
+        npy = Path(str(prefix) + "_embeddings.npy")
+        csv_p = Path(str(prefix) + "_windows.csv")
+        if npy.exists() and csv_p.exists():
+            parts.append((npy, csv_p))
+        elif npy.exists() or csv_p.exists():
+            raise RuntimeError(f"partial LR output for worker {spec.worker_idx}: {npy} {csv_p}")
+        # Empty subset is allowed (some buckets get 0 windows when total < N_workers).
+
+    if not parts:
+        raise RuntimeError("no LR worker produced any output")
+
+    embs = [np.load(p) for p, _ in parts]
+    emb_cat = np.concatenate(embs, axis=0)
+    np.save(out_dir / f"{stem}_embeddings.npy", emb_cat)
+
+    rows: list[list[str]] = []
+    header: list[str] = []
+    for _, csv_p in parts:
+        with open(csv_p) as fh:
+            rd = csv.reader(fh)
+            file_header = next(rd, None)
+            if file_header and not header:
+                header = file_header
+            for r in rd:
+                rows.append(r)
+    if not header:
+        header = ["contig", "start", "end"]
+    with open(out_dir / f"{stem}_windows.csv", "w", newline="") as fh:
+        wr = csv.writer(fh)
+        wr.writerow(header)
+        wr.writerows(rows)
+
+    log.info("lr concat: %d parts → %d rows × %d dims at %s/%s_*",
+             len(parts), emb_cat.shape[0], emb_cat.shape[1], out_dir, stem)
+    return emb_cat.shape[0]
+
+
+def run_parallel_lr(*, fasta_path: Path, metadata_csv: Path, emb_dir: Path,
+                    stem: str, work_dir: Path,
+                    serve_root: Path, npmaster_root: Path, python_bin: Path,
+                    torch_lib: str,
+                    hosts: list[str], gpus_per_host: int) -> int:
+    """Parallel 4096-dim mean-pool extract for the LR type classifier.
+
+    Reuses metadata_csv (already produced by walk_fasta_to_metadata).
+    Returns the number of windows in the merged output."""
+    n_workers = len(hosts) * gpus_per_host
+    subsets = partition_window_ids(metadata_csv, n_workers, work_dir / "lr_subsets")
+    specs: list[WorkerSpec] = []
+    for i in range(n_workers):
+        host = hosts[i // gpus_per_host]
+        cuda = i % gpus_per_host
+        specs.append(WorkerSpec(
+            worker_idx=i, host=host, cuda_device=cuda,
+            subset_txt=subsets[i],
+            out_subdir=work_dir / f"_lr_w{i:02d}",
+        ))
+
+    failures: list[tuple[WorkerSpec, int, str]] = []
+    with ThreadPoolExecutor(max_workers=n_workers) as ex:
+        futures = []
+        for spec in specs:
+            cmd = _build_lr_cmd(
+                spec, fasta_path=fasta_path, metadata_csv=metadata_csv,
+                out_prefix=spec.out_subdir / "lr",
+                serve_root=serve_root, python_bin=python_bin,
+                npmaster_root=npmaster_root, torch_lib=torch_lib,
+            )
+            futures.append(ex.submit(_run_one, spec, cmd))
+        for fut in as_completed(futures):
+            spec, rc, _, stderr = fut.result()
+            if rc != 0:
+                failures.append((spec, rc, stderr))
+
+    if failures:
+        details = "\n".join(
+            f"[lr_w{s.worker_idx:02d} {s.host} gpu{s.cuda_device}] exit={rc}\n  stderr:\n{err[-800:]}"
+            for s, rc, err in failures
+        )
+        raise RuntimeError(f"{len(failures)}/{n_workers} LR workers failed:\n{details}")
+
+    n_windows = _concat_lr_outputs(specs, emb_dir, stem)
+    # Cleanup per-worker dirs
+    for spec in specs:
+        for f in list(spec.out_subdir.glob("*")):
+            try: f.unlink()
+            except OSError: pass
+        try: spec.out_subdir.rmdir()
+        except OSError: pass
+    return n_windows
+
+
 def run_parallel(*, fasta_path: Path, features_dir: Path, stem: str,
                  repo_root: Path, python_bin: Path, torch_lib: str,
                  window: int, stride: int,
