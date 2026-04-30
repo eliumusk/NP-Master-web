@@ -4,8 +4,49 @@
 
 :root {
   color-scheme: light dark;
+  --brand: 79 70 229;       /* indigo-600 */
+  --brand-fg: 255 255 255;
 }
 
 html, body {
   height: 100%;
 }
+
+body {
+  font-feature-settings: "ss01" on, "cv11" on;
+}
+
+/* Tabular numerals for any element with .tabular-nums (already a util in Tailwind) — extra opt-in for headings */
+.numeric-display {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Generic focus ring (a11y) */
+*:focus-visible {
+  outline: 2px solid rgb(var(--brand));
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Skeleton shimmer */
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, rgb(241 245 249) 0%, rgb(226 232 240) 50%, rgb(241 245 249) 100%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+.dark .skeleton {
+  background: linear-gradient(90deg, rgb(30 41 59) 0%, rgb(51 65 85) 50%, rgb(30 41 59) 100%);
+  background-size: 200% 100%;
+}
+
+/* Status pulsing dot for "running" jobs */
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.6; }
+}
+.pulse-dot { animation: pulse-dot 1.4s ease-in-out infinite; }

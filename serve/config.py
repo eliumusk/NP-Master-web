@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     gpu_wait_timeout_sec: int = Field(default=1800, alias="GPU_WAIT_TIMEOUT_SEC")
     gpu_poll_sec: int = Field(default=30, alias="GPU_POLL_SEC")
 
-    max_fasta_bytes: int = Field(default=10 * 1024 * 1024, alias="MAX_FASTA_BYTES")
+    max_fasta_bytes: int = Field(default=50 * 1024 * 1024, alias="MAX_FASTA_BYTES")
     poll_interval_sec: int = Field(default=5, alias="POLL_INTERVAL_SEC")
     heartbeat_sec: int = Field(default=10, alias="HEARTBEAT_SEC")
 

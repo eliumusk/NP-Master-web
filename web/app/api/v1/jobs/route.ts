@@ -1,7 +1,9 @@
+// Public REST API for job creation. Mirrors /api/jobs/new but skips Turnstile
+// (relies on rate-limit triggers + client_id namespacing instead).
+
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { JobCreate } from "@/lib/schemas";
-import { verifyTurnstile } from "@/lib/turnstile";
 
 const ANON_MAX_BYTES = 25 * 1024 * 1024;
 const AUTH_MAX_BYTES = 50 * 1024 * 1024;
@@ -16,33 +18,22 @@ export async function POST(request: NextRequest) {
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  const clientId = input.clientId ?? request.headers.get("x-client-id") ?? null;
 
-  // Anon path requires a clientId (browser-generated UUID stored in localStorage).
-  if (!user && !input.clientId) {
-    return NextResponse.json({ error: "anonymous submissions require clientId" }, { status: 400 });
+  if (!user && !clientId) {
+    return NextResponse.json({ error: "anonymous submissions require clientId in payload or x-client-id header" }, { status: 400 });
   }
 
-  // Per-tier byte cap.
   const cap = user ? AUTH_MAX_BYTES : ANON_MAX_BYTES;
   if (input.bytes > cap) {
     return NextResponse.json({
-      error: `File is ${(input.bytes / 1024 / 1024).toFixed(1)} MB, limit is ${(cap / 1024 / 1024).toFixed(0)} MB. ${user ? "" : "Sign in for higher limits, or split by contig."}`,
+      error: `File is ${(input.bytes / 1024 / 1024).toFixed(1)} MB, limit is ${(cap / 1024 / 1024).toFixed(0)} MB.`,
     }, { status: 413 });
   }
 
-  // Turnstile is optional (enforced only when secret is configured).
-  if (process.env.TURNSTILE_SECRET) {
-    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? undefined;
-    if (!input.turnstileToken || !(await verifyTurnstile(input.turnstileToken, ip))) {
-      return NextResponse.json({ error: "turnstile verification failed" }, { status: 400 });
-    }
-  }
-
-  // Storage path: namespace by user_id (auth) OR client_id (anon).
-  const ownerKey = user?.id ?? `anon/${input.clientId!}`;
+  const ownerKey = user?.id ?? `anon/${clientId!}`;
   const objectKey = `${ownerKey}/${input.sha256}.fasta`;
   const bucket = process.env.FASTA_BUCKET ?? "fasta-uploads";
-
   const admin = createServiceRoleClient();
 
   const { data: signedUpload, error: signErr } = await admin.storage
@@ -52,7 +43,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `signed url failed: ${signErr?.message ?? "unknown"}` }, { status: 500 });
   }
 
-  // Insert via service role so anon paths and rate-limit triggers work uniformly.
   const insertRow: Record<string, unknown> = {
     fasta_path: objectKey,
     fasta_sha256: input.sha256,
@@ -61,7 +51,7 @@ export async function POST(request: NextRequest) {
     min_len_bp: input.minLenBp,
   };
   if (user) insertRow.user_id = user.id;
-  else insertRow.client_id = input.clientId;
+  else insertRow.client_id = clientId;
 
   const { data: job, error: insertErr } = await admin
     .from("jobs")
@@ -75,7 +65,6 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     jobId: job.id,
     uploadUrl: signedUpload.signedUrl,
-    uploadToken: signedUpload.token,
     objectKey,
   });
 }
