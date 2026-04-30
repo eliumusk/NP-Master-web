@@ -65,11 +65,17 @@ export function LandingSubmit({ isLoggedIn }: { isLoggedIn: boolean }) {
         const j = await r1.json().catch(() => ({}));
         setPhase("error"); toast.error(j.error ?? `创建失败 (${r1.status})`); return;
       }
-      const { jobId, uploadUrl } = await r1.json() as { jobId: string; uploadUrl: string };
-      setPhase("uploading"); setProgress(0);
-      try { await uploadWithProgress(uploadUrl, file, setProgress); }
-      catch (e: any) { setPhase("error"); toast.error(`上传失败: ${e.message ?? e}`); return; }
-      toast.success(`任务已创建 #${jobId.slice(0, 6)}`);
+      const { jobId, uploadUrl, alreadyUploaded } = await r1.json() as { jobId: string; uploadUrl: string | null; alreadyUploaded?: boolean };
+      if (uploadUrl) {
+        setPhase("uploading"); setProgress(0);
+        try { await uploadWithProgress(uploadUrl, file, setProgress); }
+        catch (e: any) { setPhase("error"); toast.error(`上传失败: ${e.message ?? e}`); return; }
+      }
+      toast.success(
+        alreadyUploaded
+          ? `命中缓存 — 任务 #${jobId.slice(0, 6)} 已创建`
+          : `任务已创建 #${jobId.slice(0, 6)}`,
+      );
       router.push(`/jobs/${jobId}`);
     } else {
       if (!accession.trim()) { toast.error("请输入 NCBI accession"); return; }

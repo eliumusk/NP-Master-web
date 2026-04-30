@@ -88,17 +88,24 @@ export function SubmitForm({ isLoggedIn }: { isLoggedIn: boolean }) {
       toast.error(j.error ?? `创建任务失败 (${r1.status})`);
       return;
     }
-    const { jobId, uploadUrl } = await r1.json() as { jobId: string; uploadUrl: string };
-    setPhase("uploading"); setProgress(0);
-    try {
-      await uploadWithProgress(uploadUrl, file, setProgress);
-    } catch (e: any) {
-      setPhase("error");
-      toast.error(`上传失败: ${e.message ?? e}`);
-      return;
+    const { jobId, uploadUrl, alreadyUploaded } = await r1.json() as { jobId: string; uploadUrl: string | null; alreadyUploaded?: boolean };
+    if (uploadUrl) {
+      setPhase("uploading"); setProgress(0);
+      try {
+        await uploadWithProgress(uploadUrl, file, setProgress);
+      } catch (e: any) {
+        setPhase("error");
+        toast.error(`上传失败: ${e.message ?? e}`);
+        return;
+      }
     }
     setPhase("done");
-    toast.success(`任务已创建 #${jobId.slice(0, 6)}`, { description: "正在跳转到任务详情页…" });
+    toast.success(
+      alreadyUploaded
+        ? `命中缓存 — 任务 #${jobId.slice(0, 6)} 已创建`
+        : `任务已创建 #${jobId.slice(0, 6)}`,
+      { description: "正在跳转到任务详情页…" },
+    );
     router.push(`/jobs/${jobId}`);
   }
 

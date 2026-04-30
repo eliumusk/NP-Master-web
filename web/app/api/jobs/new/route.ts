@@ -41,15 +41,27 @@ export async function POST(request: NextRequest) {
   // Storage path: namespace by user_id (auth) OR client_id (anon).
   const ownerKey = user?.id ?? `anon/${input.clientId!}`;
   const objectKey = `${ownerKey}/${input.sha256}.fasta`;
+  const filename = `${input.sha256}.fasta`;
   const bucket = process.env.FASTA_BUCKET ?? "fasta-uploads";
-
   const admin = createServiceRoleClient();
 
-  const { data: signedUpload, error: signErr } = await admin.storage
+  // If the same sha256 is already in this user's Storage namespace, skip the
+  // upload step. The worker will pick up the existing object via the cached
+  // path and (if features were also cached) finish in seconds.
+  const { data: existingList } = await admin.storage
     .from(bucket)
-    .createSignedUploadUrl(objectKey);
-  if (signErr || !signedUpload) {
-    return NextResponse.json({ error: `signed url failed: ${signErr?.message ?? "unknown"}` }, { status: 500 });
+    .list(ownerKey, { search: filename, limit: 1 });
+  const alreadyUploaded = !!(existingList?.some((o) => o.name === filename));
+
+  let uploadUrl: string | null = null;
+  if (!alreadyUploaded) {
+    const { data: signedUpload, error: signErr } = await admin.storage
+      .from(bucket)
+      .createSignedUploadUrl(objectKey);
+    if (signErr || !signedUpload) {
+      return NextResponse.json({ error: `signed url failed: ${signErr?.message ?? "unknown"}` }, { status: 500 });
+    }
+    uploadUrl = signedUpload.signedUrl;
   }
 
   // Insert via service role so anon paths and rate-limit triggers work uniformly.
@@ -74,8 +86,8 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     jobId: job.id,
-    uploadUrl: signedUpload.signedUrl,
-    uploadToken: signedUpload.token,
+    uploadUrl,           // null when the object already exists; client should skip PUT.
     objectKey,
+    alreadyUploaded,
   });
 }
