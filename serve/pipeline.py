@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from .cache import features_dir_for, features_dir_size_bytes, is_features_ready
-from .classify_adapter import prepare_per_window_embeddings
+# classify_adapter is intentionally imported lazily (inside _classify) since it
+# pulls numpy/pandas, which the worker venv doesn't need until classify is on.
 from .client import (
     download_object,
     feature_cache_insert,
@@ -22,6 +23,7 @@ from .client import (
 from .config import Settings
 from .fasta import csv_regions_to_bed, sha256_file, validate_fasta, write_faidx
 from .gpu_guard import wait_for_gpu
+from .parallel_extract import run_parallel as _run_parallel_extract
 
 log = logging.getLogger(__name__)
 
@@ -80,19 +82,43 @@ def _run_subprocess(cmd: list[str], cwd: Path, stage: str, python_bin: Path) -> 
     return tail_stdout + ("\n--- stderr ---\n" + tail_stderr if tail_stderr.strip() else "")
 
 
+def _torch_lib_for(python_bin: Path) -> str:
+    """Resolve the torch/lib dir under the conda env containing python_bin."""
+    env_root = python_bin.parent.parent
+    candidates = list(env_root.glob("lib/python*/site-packages/torch/lib"))
+    if not candidates:
+        raise PipelineError(f"could not locate torch/lib under {env_root}")
+    return str(candidates[0])
+
+
 def _extract(settings: Settings, fasta_path: Path, features_dir: Path, stem: str) -> str:
+    """Run parallel extract across configured hosts × gpus_per_host."""
     features_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        str(settings.python_bin),
-        "scripts/extract/extract_evo2_per_token_features.py",
-        "--source", "genome",
-        "--fasta", str(fasta_path),
-        "--out-dir", str(features_dir),
-        "--stem", stem,
-        "--window", str(settings.extract_window),
-        "--stride", str(settings.extract_stride),
-    ]
-    return _run_subprocess(cmd, settings.npmaster_repo_root, stage="extract", python_bin=settings.python_bin)
+    hosts = [h.strip() for h in settings.extract_hosts.split(",") if h.strip()]
+    gpus_per_host = settings.extract_gpus_per_host
+    n_workers = len(hosts) * gpus_per_host
+    log.info(
+        "extract: %d workers across %s (%d gpu/host)",
+        n_workers, hosts, gpus_per_host,
+    )
+    work_dir = features_dir / "_meta"
+    t0 = time.time()
+    n_parts = _run_parallel_extract(
+        fasta_path=fasta_path,
+        features_dir=features_dir,
+        stem=stem,
+        repo_root=settings.npmaster_repo_root,
+        python_bin=settings.python_bin,
+        torch_lib=_torch_lib_for(settings.python_bin),
+        window=settings.extract_window,
+        stride=settings.extract_stride,
+        hosts=hosts,
+        gpus_per_host=gpus_per_host,
+        work_dir=work_dir,
+    )
+    dt = time.time() - t0
+    log.info("[extract] done: %d parts in %.1fs (parallel, %d workers)", n_parts, dt, n_workers)
+    return f"parallel extract: {n_parts} parts, {n_workers} workers, {dt:.1f}s"
 
 
 def _infer(settings: Settings, features_dir: Path, probs_dir: Path, stem: str) -> str:

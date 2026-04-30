@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     upsample_k: int = Field(default=8, alias="UPSAMPLE_K")
     extract_window: int = Field(default=8192, alias="EXTRACT_WINDOW")
     extract_stride: int = Field(default=2048, alias="EXTRACT_STRIDE")
+    # Multi-GPU parallel extract. Comma-separated list of ssh hosts that all
+    # share /data via NFS. "localhost" runs locally. Each host contributes
+    # `extract_gpus_per_host` workers (CUDA_VISIBLE_DEVICES=0..N-1).
+    extract_hosts: str = Field(default="localhost,node8", alias="EXTRACT_HOSTS")
+    extract_gpus_per_host: int = Field(default=8, alias="EXTRACT_GPUS_PER_HOST")
 
     gpu_min_free_gb: float = Field(default=20.0, alias="GPU_MIN_FREE_GB")
     gpu_wait_timeout_sec: int = Field(default=1800, alias="GPU_WAIT_TIMEOUT_SEC")
