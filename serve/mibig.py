@@ -133,7 +133,6 @@ def search_regions_against_mibig(*, regions_gbk: Path, dmnd_db: Path,
            "-o", str(blast_out),
            "--outfmt", "6", "qseqid", "sseqid", "pident", "evalue",
            "length", "qlen", "slen", "bitscore",
-           "--top", "5",                # within-query coverage
            "-k", str(top_k * 4),         # extra slack for cross-CDS dedup
            "--more-sensitive",
            "-p", str(threads),
