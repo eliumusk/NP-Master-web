@@ -191,17 +191,15 @@ def run_job(supa: Any, settings: Settings, job: dict[str, Any]) -> dict[str, Any
     _infer(settings, features_dir, probs_dir, stem)
 
     results_dir = cache / "results" / job_id
-    csv_path = results_dir / "regions.csv"
+    raw_csv = results_dir / "regions_raw.csv"
     update_job(supa, job_id, log_tail="decoding regions")
-    _decode(settings, probs_dir, csv_path, threshold, min_len_bp)
+    _decode(settings, probs_dir, raw_csv, threshold, min_len_bp)
 
-    # NOTE: BGC type classification is staged but disabled until 4096-dim
-    # features are available. The current pipeline produces 128-dim projected
-    # features (from R: 4096→128, fixed projection seed) but the LR type
-    # classifier was trained on raw 4096-dim Evo2 hidden states. Re-extracting
-    # at 4096-dim costs another full Evo2 pass; we'll wire it back in once
-    # Fix 3 (16-GPU parallel) brings the cost down. Until then, regions land
-    # with bgc_type = NULL.
+    update_job(supa, job_id, log_tail="classifying BGC types")
+    classify_emb_dir = results_dir / "classify_emb"
+    prepare_per_window_embeddings(features_dir, stem, classify_emb_dir)
+    csv_path = results_dir / "regions.csv"
+    _classify(settings, raw_csv, classify_emb_dir, csv_path)
 
     bed_path = results_dir / "regions.bed"
     n_regions = csv_regions_to_bed(csv_path, bed_path)

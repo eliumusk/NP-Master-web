@@ -24,7 +24,14 @@ type Job = {
   finished_at: string | null;
 };
 
-type Region = { contig: string; start_bp: number; end_bp: number; score: number };
+type Region = {
+  contig: string;
+  start_bp: number;
+  end_bp: number;
+  score: number;
+  bgc_type?: string | null;
+  type_score?: number | null;
+};
 
 export function JobDetail({ initialJob, initialRegions }: { initialJob: Job; initialRegions: Region[] }) {
   const [job, setJob] = useState<Job>(initialJob);

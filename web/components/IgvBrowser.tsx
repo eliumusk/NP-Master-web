@@ -32,7 +32,8 @@ export function IgvBrowser({ fastaUrl, faiUrl, bedUrl }: Props) {
             format: "bed",
             url: bedUrl,
             displayMode: "EXPANDED",
-            color: "#7c3aed",
+            // BED9 itemRgb sets per-feature color; no global color so IGV
+            // renders each region in its type-specific color.
           },
         ],
       });

@@ -20,7 +20,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
   const { data: regions } = await supabase
     .from("regions")
-    .select("contig,start_bp,end_bp,score")
+    .select("contig,start_bp,end_bp,score,bgc_type,type_score")
     .eq("job_id", id)
     .order("score", { ascending: false });
 
