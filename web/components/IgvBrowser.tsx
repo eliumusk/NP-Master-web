@@ -4,39 +4,59 @@ import { useEffect, useRef, useState } from "react";
 
 type Props = { fastaUrl: string; faiUrl: string; bedUrl: string; wigUrl?: string };
 
+type IgvNamespace = {
+  createBrowser: (el: HTMLElement, opts: unknown) => Promise<unknown>;
+  [k: string]: unknown;
+};
+
 declare global {
   interface Window {
-    igv?: {
-      createBrowser: (el: HTMLElement, opts: unknown) => Promise<unknown>;
-    };
+    igv?: IgvNamespace;
   }
 }
 
-const IGV_CDN_URL = "https://cdn.jsdelivr.net/npm/igv@2.15.11/dist/igv.min.js";
+// CDN candidates tried in order. unpkg is a separate origin from jsdelivr —
+// useful when one mirror returns a stale or broken build.
+const CDN_CANDIDATES = [
+  "https://cdn.jsdelivr.net/npm/igv@2.15.13/dist/igv.min.js",
+  "https://unpkg.com/igv@2.15.13/dist/igv.min.js",
+  "https://cdn.jsdelivr.net/npm/igv@2.15.11/dist/igv.min.js",
+];
 
-function loadIgv(): Promise<NonNullable<Window["igv"]>> {
-  if (typeof window === "undefined") return Promise.reject(new Error("not in browser"));
-  if (window.igv) return Promise.resolve(window.igv);
-
+function injectScript(url: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(`script[src="${IGV_CDN_URL}"]`);
-    const onReady = () => {
-      if (window.igv) resolve(window.igv);
-      else reject(new Error("igv script loaded but window.igv missing"));
-    };
-    if (existing) {
-      if (window.igv) onReady();
-      else existing.addEventListener("load", onReady);
-      existing.addEventListener("error", () => reject(new Error("failed to load igv from CDN")));
-      return;
-    }
     const s = document.createElement("script");
-    s.src = IGV_CDN_URL;
+    s.src = url;
     s.async = true;
-    s.onload = onReady;
-    s.onerror = () => reject(new Error("failed to load igv from CDN"));
+    s.crossOrigin = "anonymous";
+    s.onload = () => resolve(window.igv);
+    s.onerror = () => reject(new Error(`failed to load ${url}`));
     document.head.appendChild(s);
   });
+}
+
+async function loadIgv(): Promise<IgvNamespace> {
+  if (typeof window === "undefined") throw new Error("not in browser");
+  if (window.igv && typeof (window.igv as any).createBrowser === "function") {
+    return window.igv as IgvNamespace;
+  }
+  let lastErr: unknown = null;
+  for (const url of CDN_CANDIDATES) {
+    try {
+      await injectScript(url);
+      const ns = window.igv;
+      const ok = !!ns && typeof (ns as any).createBrowser === "function";
+      console.info("[IGV] loaded from", url, "createBrowser?", ok,
+        "keys:", ns ? Object.keys(ns).slice(0, 12).join(",") : "(none)");
+      if (ok) return ns as IgvNamespace;
+      // Wrong shape: clear so next CDN attempt doesn't see stale global.
+      try { delete (window as any).igv; } catch { /* fine */ }
+    } catch (e) {
+      lastErr = e;
+      console.warn("[IGV] CDN candidate failed:", url, e);
+    }
+  }
+  throw new Error(`all igv CDN candidates failed (last: ${lastErr})`);
 }
 
 export function IgvBrowser({ fastaUrl, faiUrl, bedUrl, wigUrl }: Props) {
