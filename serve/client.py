@@ -76,26 +76,52 @@ def _opt_str(v: Any) -> str | None:
 
 @_retry
 def insert_regions(supa: Client, job_id: str, rows: list[dict[str, Any]],
-                   mibig_hits_by_index: dict[int, list[dict]] | None = None) -> None:
-    """Insert rows; optionally attach MIBiG nearest-neighbor hits keyed by 1-based row index."""
+                   mibig_hits_by_index: dict[int, list[dict]] | None = None,
+                   cds_features_by_index: dict[int, list[dict]] | None = None) -> None:
+    """Insert rows; optionally attach MIBiG nearest-neighbor hits and per-CDS
+    Pfam annotations keyed by 1-based row index.
+
+    Resilient to missing optional columns: if the schema has not yet been
+    migrated for `cds_features` (PGRST204), we drop that field and retry."""
     if not rows:
         return
-    payload = []
-    for i, r in enumerate(rows, start=1):
-        item = {
-            "job_id": job_id,
-            "contig": r["contig"],
-            "start_bp": int(r["start"]),
-            "end_bp": int(r["end"]),
-            "score": float(r["score"]),
-            "bgc_type": _opt_str(r.get("v4_1_type")),
-            "type_score": _opt_float(r.get("v4_1_type_score")),
-        }
-        if mibig_hits_by_index and i in mibig_hits_by_index:
-            item["mibig_hits"] = mibig_hits_by_index[i]
-        payload.append(item)
-    for i in range(0, len(payload), 500):
-        supa.table("regions").insert(payload[i : i + 500]).execute()
+
+    def _build(payload_keys_to_keep: set[str]) -> list[dict]:
+        out = []
+        for i, r in enumerate(rows, start=1):
+            item: dict[str, Any] = {
+                "job_id":     job_id,
+                "contig":     r["contig"],
+                "start_bp":   int(r["start"]),
+                "end_bp":     int(r["end"]),
+                "score":      float(r["score"]),
+                "bgc_type":   _opt_str(r.get("v4_1_type")),
+                "type_score": _opt_float(r.get("v4_1_type_score")),
+            }
+            if "mibig_hits" in payload_keys_to_keep and mibig_hits_by_index and i in mibig_hits_by_index:
+                item["mibig_hits"] = mibig_hits_by_index[i]
+            if "cds_features" in payload_keys_to_keep and cds_features_by_index and i in cds_features_by_index:
+                item["cds_features"] = cds_features_by_index[i]
+            out.append(item)
+        return out
+
+    keep = {"mibig_hits", "cds_features"}
+    while True:
+        payload = _build(keep)
+        try:
+            for i in range(0, len(payload), 500):
+                supa.table("regions").insert(payload[i : i + 500]).execute()
+            return
+        except Exception as e:
+            msg = str(e)
+            # PostgREST returns PGRST204 when an inserted column doesn't exist.
+            for col in ("cds_features", "mibig_hits"):
+                if col in keep and (f"'{col}'" in msg or f'"{col}"' in msg or col in msg) and "PGRST204" in msg:
+                    log.warning("insert_regions: column %s missing in DB; retrying without (apply migration to enable)", col)
+                    keep.discard(col)
+                    break
+            else:
+                raise
 
 
 @_retry

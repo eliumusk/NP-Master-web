@@ -31,6 +31,7 @@ type Region = {
   contig: string; start_bp: number; end_bp: number; score: number;
   bgc_type?: string | null; type_score?: number | null;
   mibig_hits?: { bgc_id: string; identity: number; product?: string }[] | null;
+  cds_features?: any[] | null;
 };
 
 const TYPE_PILL: Record<string, string> = {

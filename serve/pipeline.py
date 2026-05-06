@@ -339,6 +339,38 @@ def run_job(supa: Any, settings: Settings, job: dict[str, Any]) -> dict[str, Any
         except (IndexError, ValueError):
             pass
 
+    # ── Pfam domain annotation per region CDS ───────────────────────────
+    # Reuses the same regions.gbk we just generated. Function classification
+    # (core / additional / transport / regulatory / resistance / other) lets
+    # the frontend draw an antiSMASH-style coloured gene track.
+    cds_features: dict[str, list[dict]] = {}
+    if gbk_path and gbk_path.exists() and settings.pfam_db_path.exists():
+        update_job(supa, job_id, log_tail="annotating Pfam domains")
+        try:
+            from .pfam import annotate_regions_gbk
+            cds_features = annotate_regions_gbk(
+                regions_gbk=gbk_path,
+                pfam_db=settings.pfam_db_path,
+                work_dir=results_dir / "_pfam_work",
+                hmmer_bin=settings.hmmer_bin,
+                threads=settings.hmmer_threads,
+            )
+            log.info("pfam: annotated %d/%d regions",
+                     sum(1 for v in cds_features.values() if v), n_regions)
+        except Exception as e:
+            log.warning("pfam annotation failed (non-fatal): %s", e)
+            cds_features = {}
+    else:
+        log.info("pfam: skipped (db missing or gbk missing)")
+
+    cds_features_by_index: dict[int, list[dict]] = {}
+    for name, items in cds_features.items():
+        try:
+            idx = int(name.split("_")[1])
+            cds_features_by_index[idx] = items
+        except (IndexError, ValueError):
+            pass
+
     update_job(supa, job_id, log_tail=f"uploading results ({n_regions} regions)")
     csv_key = f"{job_id}/regions.csv"
     bed_key = f"{job_id}/regions.bed"
@@ -357,7 +389,11 @@ def run_job(supa: Any, settings: Settings, job: dict[str, Any]) -> dict[str, Any
 
     with open(csv_path, newline="") as fh:
         rows = list(csv.DictReader(fh))
-    insert_regions(supa, job_id, rows, mibig_hits_by_index=mibig_hits_by_index)
+    insert_regions(
+        supa, job_id, rows,
+        mibig_hits_by_index=mibig_hits_by_index,
+        cds_features_by_index=cds_features_by_index,
+    )
 
     return {
         "result_csv_path": csv_key,

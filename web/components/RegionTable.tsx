@@ -1,3 +1,8 @@
+"use client";
+
+import { useState } from "react";
+import { RegionDetailPanel } from "./RegionDetailPanel";
+
 type MibigHit = { bgc_id: string; identity: number; product?: string };
 type Region = {
   contig: string;
@@ -7,10 +12,9 @@ type Region = {
   bgc_type?: string | null;
   type_score?: number | null;
   mibig_hits?: MibigHit[] | null;
+  cds_features?: any[] | null;
 };
 
-// BGC type → Tailwind classes (using bgc.* tokens from tailwind.config.ts).
-// All seven keep the same HSL saturation/lightness so badges feel uniform.
 const TYPE_CLASS: Record<string, string> = {
   Alkaloid:   "bg-bgc-alkaloid-soft   text-bgc-alkaloid-fg",
   Terpene:    "bg-bgc-terpene-soft    text-bgc-terpene-fg",
@@ -54,7 +58,20 @@ function MibigCell({ hits }: { hits: MibigHit[] | null | undefined }) {
   );
 }
 
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`h-3 w-3 transition-transform ${open ? "rotate-90" : ""}`}
+      viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+    >
+      <polyline points="4 2 8 6 4 10" />
+    </svg>
+  );
+}
+
 export function RegionTable({ regions }: { regions: Region[] }) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
   if (regions.length === 0) {
     return (
       <div className="rounded-card border border-dashed border-border bg-elevated/40 p-8 text-center">
@@ -62,10 +79,20 @@ export function RegionTable({ regions }: { regions: Region[] }) {
       </div>
     );
   }
+
+  function toggle(i: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+  }
+
   return (
     <div className="overflow-x-auto rounded-card border border-border">
       <table className="w-full text-sm">
         <colgroup>
+          <col style={{ width: "2.5rem" }} />
           <col style={{ width: "3rem" }} />
           <col style={{ width: "7rem" }} />
           <col />
@@ -78,6 +105,7 @@ export function RegionTable({ regions }: { regions: Region[] }) {
         </colgroup>
         <thead className="bg-elevated/60 text-left text-xs uppercase tracking-wider text-fg-muted">
           <tr>
+            <th className="px-2 py-3"></th>
             <th className="px-3 py-3">#</th>
             <th className="px-3 py-3">类型</th>
             <th className="px-3 py-3">Contig</th>
@@ -90,21 +118,45 @@ export function RegionTable({ regions }: { regions: Region[] }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {regions.map((r, i) => (
-            <tr key={i} className="even:bg-elevated/20 hover:bg-elevated/60">
-              <td className="numeric-display px-3 py-3 text-fg-muted">{i + 1}</td>
-              <td className="px-3 py-3"><TypeBadge type={r.bgc_type} /></td>
-              <td className="px-3 py-3 font-mono text-xs">{r.contig}</td>
-              <td className="numeric-display px-3 py-3 text-right text-sm">{r.start_bp.toLocaleString()}</td>
-              <td className="numeric-display px-3 py-3 text-right text-sm">{r.end_bp.toLocaleString()}</td>
-              <td className="numeric-display px-3 py-3 text-right text-sm">{(r.end_bp - r.start_bp).toLocaleString()}</td>
-              <td className="numeric-display px-3 py-3 text-right text-sm">{r.score.toFixed(3)}</td>
-              <td className="numeric-display px-3 py-3 text-right text-sm">
-                {r.type_score == null ? "—" : r.type_score.toFixed(3)}
-              </td>
-              <td className="px-3 py-3"><MibigCell hits={r.mibig_hits ?? null} /></td>
-            </tr>
-          ))}
+          {regions.map((r, i) => {
+            const isOpen = expanded.has(i);
+            const hasDetail = !!(r.cds_features && r.cds_features.length > 0);
+            return (
+              <>
+                <tr
+                  key={i}
+                  className={`${i % 2 === 1 ? "bg-elevated/20" : ""} hover:bg-elevated/60 ${hasDetail ? "cursor-pointer" : ""}`}
+                  onClick={() => hasDetail && toggle(i)}
+                >
+                  <td className="px-2 py-3 text-fg-muted">
+                    {hasDetail ? <ChevronIcon open={isOpen} /> : <span className="text-fg-subtle">·</span>}
+                  </td>
+                  <td className="numeric-display px-3 py-3 text-fg-muted">{i + 1}</td>
+                  <td className="px-3 py-3"><TypeBadge type={r.bgc_type} /></td>
+                  <td className="px-3 py-3 font-mono text-xs">{r.contig}</td>
+                  <td className="numeric-display px-3 py-3 text-right text-sm">{r.start_bp.toLocaleString()}</td>
+                  <td className="numeric-display px-3 py-3 text-right text-sm">{r.end_bp.toLocaleString()}</td>
+                  <td className="numeric-display px-3 py-3 text-right text-sm">{(r.end_bp - r.start_bp).toLocaleString()}</td>
+                  <td className="numeric-display px-3 py-3 text-right text-sm">{r.score.toFixed(3)}</td>
+                  <td className="numeric-display px-3 py-3 text-right text-sm">
+                    {r.type_score == null ? "—" : r.type_score.toFixed(3)}
+                  </td>
+                  <td className="px-3 py-3"><MibigCell hits={r.mibig_hits ?? null} /></td>
+                </tr>
+                {isOpen && hasDetail && (
+                  <tr key={`${i}-detail`} className="bg-elevated/40">
+                    <td colSpan={10} className="px-4 py-4">
+                      <RegionDetailPanel
+                        cdsFeatures={r.cds_features as any}
+                        regionStartBp={r.start_bp}
+                        regionEndBp={r.end_bp}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </>
+            );
+          })}
         </tbody>
       </table>
     </div>

@@ -50,6 +50,15 @@ class Settings(BaseSettings):
         default=Path("/data/syh/NP-Master-web/data/mibig/mibig_meta.json"),
         alias="MIBIG_META_PATH",
     )
+    hmmer_bin: Path = Field(
+        default=Path("/root/miniconda3/envs/bgc/bin/hmmscan"),
+        alias="HMMER_BIN",
+    )
+    pfam_db_path: Path = Field(
+        default=Path("/data/syh/NP-Master-web/data/pfam/Pfam-A.hmm"),
+        alias="PFAM_DB_PATH",
+    )
+    hmmer_threads: int = Field(default=8, alias="HMMER_THREADS")
     default_threshold: float = Field(default=0.50, alias="DEFAULT_THRESHOLD")
     default_min_len_bp: int = Field(default=2000, alias="DEFAULT_MIN_LEN_BP")
     upsample_k: int = Field(default=8, alias="UPSAMPLE_K")
