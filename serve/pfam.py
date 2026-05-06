@@ -237,15 +237,19 @@ def parse_domtblout(tbl_path: Path) -> dict[str, list[dict]]:
 
 def _extract_regions_proteins_with_meta(regions_gbk: Path, out_faa: Path) -> dict[str, dict]:
     """Walk regions.gbk, extract every CDS as a protein FASTA, and return
-    metadata (per CDS: region, start/end on region slice, strand, product, length_aa).
+    metadata. Each entry includes the actual amino-acid AND nucleotide
+    sequence so the frontend can offer copy-to-clipboard.
+
     Header convention matches serve.mibig: ">{regionId}|{cdsIdx:03d}".
     """
     from Bio import SeqIO
+    from Bio.Seq import Seq
 
     out_faa.parent.mkdir(parents=True, exist_ok=True)
     meta: dict[str, dict] = {}
     with open(out_faa, "w") as fout:
         for rec in SeqIO.parse(regions_gbk, "genbank"):
+            region_seq = str(rec.seq)
             for i, feat in enumerate(rec.features):
                 if feat.type != "CDS":
                     continue
@@ -254,16 +258,26 @@ def _extract_regions_proteins_with_meta(regions_gbk: Path, out_faa: Path) -> dic
                     continue
                 locus_tag = (feat.qualifiers.get("locus_tag") or [f"{rec.id}_CDS_{i:03d}"])[0]
                 product = (feat.qualifiers.get("product") or [""])[0]
+                start = int(feat.location.start)
+                end = int(feat.location.end)
+                strand = int(feat.location.strand or 1)
+                # Nucleotide sequence (already strand-corrected: take region_seq slice
+                # then reverse-complement when strand is negative).
+                nt = region_seq[start:end]
+                if strand == -1 and nt:
+                    nt = str(Seq(nt).reverse_complement())
                 key = f"{rec.id}|{i:03d}"
                 fout.write(f">{key}\n{aa}\n")
                 meta[key] = {
-                    "region_id":  rec.id,
-                    "locus_tag":  locus_tag,
-                    "start":      int(feat.location.start),
-                    "end":        int(feat.location.end),
-                    "strand":     int(feat.location.strand or 1),
-                    "product":    product or "hypothetical protein",
-                    "length_aa":  len(aa),
+                    "region_id":   rec.id,
+                    "locus_tag":   locus_tag,
+                    "start":       start,
+                    "end":         end,
+                    "strand":      strand,
+                    "product":     product or "hypothetical protein",
+                    "length_aa":   len(aa),
+                    "aa_sequence": aa,
+                    "nt_sequence": nt,
                 }
     return meta
 
@@ -308,6 +322,8 @@ def annotate_regions_gbk(*, regions_gbk: Path, pfam_db: Path, work_dir: Path,
             "length_aa":      m["length_aa"],
             "product":        m["product"],
             "function_class": classify_cds_by_domains(domains),
+            "aa_sequence":    m["aa_sequence"],
+            "nt_sequence":    m["nt_sequence"],
             "pfam_domains":   [{
                 "name":      d["name"],
                 "accession": d["accession"],

@@ -1,34 +1,21 @@
-// Expanded view inside RegionTable. Renders a gene track SVG (CDS arrows by
-// function class) + a CDS list with Pfam domain pills. Per region.
+"use client";
 
-type PfamDomain = {
-  name: string;
-  accession: string;
-  e_value: number;
-  bitscore: number;
-  env_start: number;
-  env_end: number;
-};
+// Expanded view inside RegionTable. Renders:
+//   1. A gene-track SVG (CDS arrows, click-to-select)
+//   2. A CDS list (click row to select)
+//   3. When a CDS is selected, GeneDetailsPanel below shows full info +
+//      copyable AA / NT sequences + Pfam domains + external BLAST links
 
-type CDSFeature = {
-  locus_tag: string;
-  start: number;          // genomic coords on the region slice (0-based offset)
-  end: number;
-  strand: 1 | -1;
-  length_aa: number;
-  product?: string;
-  function_class: "core_biosynthetic" | "additional_biosynthetic" | "transport"
-                | "regulatory" | "resistance" | "other";
-  pfam_domains: PfamDomain[];
-};
+import { useState } from "react";
+import { GeneDetailsPanel, type CDSFeature } from "./GeneDetailsPanel";
 
 const CLASS_FILL: Record<CDSFeature["function_class"], string> = {
-  core_biosynthetic:       "#dc2626", // red-600
-  additional_biosynthetic: "#f472b6", // pink-400
-  transport:               "#2563eb", // blue-600
-  regulatory:              "#16a34a", // green-600
-  resistance:              "#9ca3af", // gray-400
-  other:                   "#cbd5e1", // slate-300
+  core_biosynthetic:       "#dc2626",
+  additional_biosynthetic: "#f472b6",
+  transport:               "#2563eb",
+  regulatory:              "#16a34a",
+  resistance:              "#9ca3af",
+  other:                   "#cbd5e1",
 };
 
 const CLASS_LABEL: Record<CDSFeature["function_class"], string> = {
@@ -41,12 +28,15 @@ const CLASS_LABEL: Record<CDSFeature["function_class"], string> = {
 };
 
 export function RegionDetailPanel({
-  cdsFeatures, regionStartBp, regionEndBp,
+  cdsFeatures, regionContig, regionStartBp, regionEndBp,
 }: {
   cdsFeatures: CDSFeature[] | null | undefined;
+  regionContig: string;
   regionStartBp: number;
   regionEndBp: number;
 }) {
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+
   if (!cdsFeatures || cdsFeatures.length === 0) {
     return (
       <div className="rounded-card border border-dashed border-border bg-elevated/40 p-6 text-center text-sm text-fg-muted">
@@ -55,22 +45,46 @@ export function RegionDetailPanel({
     );
   }
 
+  const selected = selectedIdx != null ? cdsFeatures[selectedIdx] : null;
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <Legend />
-      <GeneTrack cdsFeatures={cdsFeatures} />
-      <CdsTable cdsFeatures={cdsFeatures} regionStartBp={regionStartBp} regionEndBp={regionEndBp} />
+      <GeneTrack
+        cdsFeatures={cdsFeatures}
+        selectedIdx={selectedIdx}
+        onSelect={(idx) => setSelectedIdx(idx)}
+      />
+      <CdsTable
+        cdsFeatures={cdsFeatures}
+        selectedIdx={selectedIdx}
+        onSelect={(idx) => setSelectedIdx(idx)}
+      />
+      {selected && (
+        <GeneDetailsPanel
+          cds={selected}
+          regionContig={regionContig}
+          regionStartBp={regionStartBp}
+          onClose={() => setSelectedIdx(null)}
+        />
+      )}
     </div>
   );
 }
 
 // ───────── Gene track SVG ─────────
 
-function GeneTrack({ cdsFeatures }: { cdsFeatures: CDSFeature[] }) {
+function GeneTrack({
+  cdsFeatures, selectedIdx, onSelect,
+}: {
+  cdsFeatures: CDSFeature[];
+  selectedIdx: number | null;
+  onSelect: (i: number) => void;
+}) {
   const minBp = Math.min(...cdsFeatures.map((c) => c.start));
   const maxBp = Math.max(...cdsFeatures.map((c) => c.end));
   const span = Math.max(1, maxBp - minBp);
-  const W = 880;          // viewBox width
+  const W = 880;
   const PAD = 12;
   const drawW = W - 2 * PAD;
   const Y_BASE = 52;
@@ -81,8 +95,12 @@ function GeneTrack({ cdsFeatures }: { cdsFeatures: CDSFeature[] }) {
   return (
     <div className="rounded-card border border-border bg-surface p-3">
       <div className="mb-2 flex items-baseline justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wider text-fg-muted">基因轨道</span>
-        <span className="numeric-display text-xs text-fg-subtle">{(span / 1000).toFixed(1)} kb · {cdsFeatures.length} CDS</span>
+        <span className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
+          基因轨道 <span className="ml-1 font-normal normal-case text-fg-subtle">点击查看详情</span>
+        </span>
+        <span className="numeric-display text-xs text-fg-subtle">
+          {(span / 1000).toFixed(1)} kb · {cdsFeatures.length} CDS
+        </span>
       </div>
       <svg viewBox={`0 0 ${W} 90`} className="h-auto w-full" role="img" aria-label="Region gene track">
         {/* Coordinate axis */}
@@ -102,23 +120,34 @@ function GeneTrack({ cdsFeatures }: { cdsFeatures: CDSFeature[] }) {
           );
         })}
 
-        {/* Arrows per CDS */}
+        {/* Arrows per CDS — clickable */}
         {cdsFeatures.map((c, i) => {
           const x1 = xOf(c.start);
           const x2 = xOf(c.end);
           const w = Math.max(4, x2 - x1);
           const fill = CLASS_FILL[c.function_class] ?? CLASS_FILL.other;
           const tip = Math.min(8, w * 0.4);
-          // Build an arrow polygon. tip on the right (strand=1) or left (strand=-1).
           const points = c.strand === 1
             ? `${x1},${Y_BASE} ${x1 + w - tip},${Y_BASE} ${x1 + w},${Y_BASE + ARROW_H / 2} ${x1 + w - tip},${Y_BASE + ARROW_H} ${x1},${Y_BASE + ARROW_H}`
             : `${x1 + tip},${Y_BASE} ${x1 + w},${Y_BASE} ${x1 + w},${Y_BASE + ARROW_H} ${x1 + tip},${Y_BASE + ARROW_H} ${x1},${Y_BASE + ARROW_H / 2}`;
           const tooltip = `${c.locus_tag} · ${CLASS_LABEL[c.function_class]} · ${c.length_aa} aa${
             c.pfam_domains.length ? ` · ${c.pfam_domains.map((d) => d.name).join(" / ")}` : ""
           }`;
+          const isSel = selectedIdx === i;
           return (
-            <g key={i}>
-              <polygon points={points} fill={fill} fillOpacity="0.85" stroke={fill} strokeWidth="0.5">
+            <g
+              key={i}
+              onClick={(e) => { e.stopPropagation(); onSelect(i); }}
+              style={{ cursor: "pointer" }}
+            >
+              <polygon
+                points={points}
+                fill={fill}
+                fillOpacity={isSel ? 1 : 0.85}
+                stroke={isSel ? "#0f172a" : fill}
+                strokeOpacity={isSel ? 1 : 0.5}
+                strokeWidth={isSel ? 2 : 0.5}
+              >
                 <title>{tooltip}</title>
               </polygon>
             </g>
@@ -149,14 +178,14 @@ function Legend() {
   );
 }
 
-// ───────── CDS table ─────────
+// ───────── CDS table (clickable rows) ─────────
 
 function CdsTable({
-  cdsFeatures, regionStartBp, regionEndBp,
+  cdsFeatures, selectedIdx, onSelect,
 }: {
   cdsFeatures: CDSFeature[];
-  regionStartBp: number;
-  regionEndBp: number;
+  selectedIdx: number | null;
+  onSelect: (i: number) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-card border border-border">
@@ -172,33 +201,53 @@ function CdsTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {cdsFeatures.map((c, i) => (
-            <tr key={i} className="even:bg-elevated/20">
-              <td className="numeric-display px-3 py-2.5 text-fg-muted">{i + 1}</td>
-              <td className="px-3 py-2.5 font-mono text-xs">
-                {c.locus_tag}
-                <span className="ml-1 text-fg-subtle">{c.strand === 1 ? "→" : "←"}</span>
-              </td>
-              <td className="numeric-display px-3 py-2.5 text-right text-xs">
-                {c.start.toLocaleString()}–{c.end.toLocaleString()}
-              </td>
-              <td className="numeric-display px-3 py-2.5 text-right text-sm">{c.length_aa}</td>
-              <td className="px-3 py-2.5">
-                <FunctionPill cls={c.function_class} />
-              </td>
-              <td className="px-3 py-2.5">
-                {c.pfam_domains.length === 0 ? (
-                  <span className="text-fg-subtle">—</span>
-                ) : (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {c.pfam_domains.map((d, j) => (
-                      <PfamPill key={j} domain={d} />
-                    ))}
-                  </div>
-                )}
-              </td>
-            </tr>
-          ))}
+          {cdsFeatures.map((c, i) => {
+            const isSel = selectedIdx === i;
+            return (
+              <tr
+                key={i}
+                onClick={() => onSelect(i)}
+                className={`cursor-pointer transition-colors ${
+                  isSel
+                    ? "bg-brand-soft text-fg"
+                    : "even:bg-elevated/20 hover:bg-elevated/60"
+                }`}
+              >
+                <td className="numeric-display px-3 py-2.5 text-fg-muted">{i + 1}</td>
+                <td className="px-3 py-2.5 font-mono text-xs">
+                  {c.locus_tag}
+                  <span className="ml-1 text-fg-subtle">{c.strand === 1 ? "→" : "←"}</span>
+                </td>
+                <td className="numeric-display px-3 py-2.5 text-right text-xs">
+                  {c.start.toLocaleString()}–{c.end.toLocaleString()}
+                </td>
+                <td className="numeric-display px-3 py-2.5 text-right text-sm">{c.length_aa}</td>
+                <td className="px-3 py-2.5">
+                  <FunctionPill cls={c.function_class} />
+                </td>
+                <td className="px-3 py-2.5">
+                  {c.pfam_domains.length === 0 ? (
+                    <span className="text-fg-subtle">—</span>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {c.pfam_domains.slice(0, 4).map((d, j) => (
+                        <span
+                          key={j}
+                          className="inline-flex items-center rounded-pill border border-border bg-elevated/60 px-2 py-0.5 font-mono text-[11px]"
+                          title={`${d.accession} · E ${d.e_value.toExponential(1)}`}
+                        >
+                          {d.name}
+                        </span>
+                      ))}
+                      {c.pfam_domains.length > 4 && (
+                        <span className="text-[10px] text-fg-subtle">+{c.pfam_domains.length - 4}</span>
+                      )}
+                    </div>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -215,22 +264,5 @@ function FunctionPill({ cls }: { cls: CDSFeature["function_class"] }) {
       <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: fill }} />
       {CLASS_LABEL[cls]}
     </span>
-  );
-}
-
-function PfamPill({ domain }: { domain: PfamDomain }) {
-  const acc = domain.accession.split(".")[0]; // PF00501.32 → PF00501 for InterPro
-  const url = `https://www.ebi.ac.uk/interpro/entry/pfam/${acc}/`;
-  const tooltip = `${domain.name} (${domain.accession})\nE = ${domain.e_value.toExponential(1)}, score ${domain.bitscore.toFixed(1)}\n${domain.env_start}-${domain.env_end} aa`;
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      title={tooltip}
-      className="inline-flex items-center gap-1 rounded-pill border border-border bg-elevated/60 px-2 py-0.5 font-mono text-[11px] text-fg transition-colors hover:bg-brand-soft hover:text-brand"
-    >
-      {domain.name}
-    </a>
   );
 }

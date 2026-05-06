@@ -148,6 +148,7 @@ export function RegionTable({ regions }: { regions: Region[] }) {
                     <td colSpan={10} className="px-4 py-4">
                       <RegionDetailPanel
                         cdsFeatures={r.cds_features as any}
+                        regionContig={r.contig}
                         regionStartBp={r.start_bp}
                         regionEndBp={r.end_bp}
                       />
