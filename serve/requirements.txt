@@ -3,6 +3,10 @@ pydantic-settings>=2.5
 pynvml>=11.5
 httpx>=0.27
 tenacity>=8.5
-# Needed for LR-extract output concat + classify_adapter
 numpy>=1.26
 pandas>=2.0
+biopython>=1.83
+scikit-learn==1.5.1
+joblib>=1.4
+pyhmmer>=0.10
+pyrodigal>=3.6

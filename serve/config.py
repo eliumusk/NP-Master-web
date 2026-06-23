@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     )
 
     model_unet_ckpt: Path = Field(alias="MODEL_UNET_CKPT")
+    type_head_joblib: Path = Field(
+        default=Path("/data/muskliu/npmaster/experiments/evo2_mibig_type/run_full/type_head.joblib"),
+        alias="TYPE_HEAD_JOBLIB",
+    )
     lr_type_ckpt_dir: Path = Field(
         default=Path("/data/muskliu/npmaster/data/evo2_lr_multiscale/type_lr"),
         alias="LR_TYPE_CKPT_DIR",
@@ -58,9 +62,13 @@ class Settings(BaseSettings):
         default=Path("/data/syh/NP-Master-web/data/pfam/Pfam-A.hmm"),
         alias="PFAM_DB_PATH",
     )
-    hmmer_threads: int = Field(default=8, alias="HMMER_THREADS")
-    default_threshold: float = Field(default=0.50, alias="DEFAULT_THRESHOLD")
+    hmmer_threads: int = Field(default=48, alias="HMMER_THREADS")
+    default_threshold: float = Field(default=0.95, alias="DEFAULT_THRESHOLD")
+    default_extend_threshold: float = Field(default=0.80, alias="DEFAULT_EXTEND_THRESHOLD")
+    default_min_support_windows: int = Field(default=3, alias="DEFAULT_MIN_SUPPORT_WINDOWS")
     default_min_len_bp: int = Field(default=2000, alias="DEFAULT_MIN_LEN_BP")
+    default_safe_tier_min: str = Field(default="Tier2", alias="DEFAULT_SAFE_TIER_MIN")
+    default_extend_flank_bp: int = Field(default=5000, alias="DEFAULT_EXTEND_FLANK_BP")
     upsample_k: int = Field(default=8, alias="UPSAMPLE_K")
     extract_window: int = Field(default=8192, alias="EXTRACT_WINDOW")
     extract_stride: int = Field(default=2048, alias="EXTRACT_STRIDE")
@@ -69,6 +77,8 @@ class Settings(BaseSettings):
     # `extract_gpus_per_host` workers (CUDA_VISIBLE_DEVICES=0..N-1).
     extract_hosts: str = Field(default="localhost,node8", alias="EXTRACT_HOSTS")
     extract_gpus_per_host: int = Field(default=8, alias="EXTRACT_GPUS_PER_HOST")
+    use_precomputed_9g_probs: bool = Field(default=True, alias="USE_PRECOMPUTED_9G_PROBS")
+    use_feature_cache: bool = Field(default=True, alias="USE_FEATURE_CACHE")
 
     gpu_min_free_gb: float = Field(default=20.0, alias="GPU_MIN_FREE_GB")
     gpu_wait_timeout_sec: int = Field(default=1800, alias="GPU_WAIT_TIMEOUT_SEC")

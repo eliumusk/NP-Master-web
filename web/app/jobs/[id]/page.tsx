@@ -1,38 +1,56 @@
 import { notFound } from "next/navigation";
-import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
+import { createServiceRoleClient, getOptionalUser } from "@/lib/supabase/server";
 import { readServerClientId } from "@/lib/server-client-id";
-import { JobDetail } from "@/components/JobDetail";
+import { JobView } from "@/components/JobView";
+import { getSignedJobArtifacts } from "@/lib/job-artifacts";
 
 export const dynamic = "force-dynamic";
 
-export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function JobPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ client_id?: string }>;
+}) {
   const { id } = await params;
-
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const clientId = !user ? await readServerClientId() : null;
+  const query = await searchParams;
+  const user = await getOptionalUser();
+  const clientId = !user ? (query.client_id ?? await readServerClientId()) : null;
   const admin = createServiceRoleClient();
 
-  // Fetch via service-role so we can serve example + anon + auth flows uniformly,
-  // then enforce authorization in the route.
   const { data: job } = await admin
     .from("jobs")
-    .select("*")
+    .select("id,title,status,error,log_tail,n_genomes,n_regions,n_safe,threshold,extend_threshold,min_support_windows,min_len_bp,safe_tier_min,extend_flank_bp,created_at,started_at,finished_at,user_id,client_id")
     .eq("id", id)
     .maybeSingle();
   if (!job) notFound();
+  const owner = (!!user && job.user_id === user.id) || (!!clientId && job.client_id === clientId);
+  if (!owner) notFound();
 
-  const isOwner =
-    (user && job.user_id === user.id) ||
-    (!!clientId && job.client_id === clientId) ||
-    job.is_example === true;
-  if (!isOwner) notFound();
+  const { data: genomes } = await admin
+    .from("genomes")
+    .select("id,genome_name,original_name,fasta_bytes,status,error,n_regions,n_safe,created_at,started_at,finished_at")
+    .eq("job_id", id)
+    .order("genome_name");
 
   const { data: regions } = await admin
     .from("regions")
-    .select("contig,start_bp,end_bp,score,bgc_type,type_score,mibig_hits,cds_features")
+    .select("id,genome_name,contig,start_bp,end_bp,ext_start_bp,ext_end_bp,score,bgc_type,type_score,safe_tier,safe_pass,safe_type_label,mibig_hits")
     .eq("job_id", id)
-    .order("score", { ascending: false });
+    .order("score", { ascending: false })
+    .limit(1000);
 
-  return <JobDetail initialJob={job} initialRegions={regions ?? []} isExample={!!job.is_example} />;
+  const artifacts = await getSignedJobArtifacts(admin, id);
+  const { user_id, client_id, ...safeJob } = job;
+  void user_id; void client_id;
+  return (
+    <JobView
+      initialJob={safeJob}
+      initialGenomes={genomes ?? []}
+      initialRegions={regions ?? []}
+      initialArtifacts={artifacts}
+      clientIdOverride={query.client_id}
+    />
+  );
 }

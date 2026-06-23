@@ -11,7 +11,7 @@ export async function sha256OfBlob(blob: Blob): Promise<string> {
 export async function sniffFasta(file: File, maxBytes = 1 << 20): Promise<{ ok: true } | { ok: false; reason: string }> {
   const head = await file.slice(0, Math.min(file.size, maxBytes)).text();
   if (!head.trimStart().startsWith(">")) {
-    return { ok: false, reason: "file does not start with a FASTA header line ('>')" };
+    return { ok: false, reason: "文件不是以 FASTA 标题行（>）开头" };
   }
   const seq = head
     .split(/\r?\n/)
@@ -24,7 +24,7 @@ export async function sniffFasta(file: File, maxBytes = 1 << 20): Promise<{ ok: 
   for (const c of seq) if (allowed.has(c)) ok++;
   const ratio = ok / seq.length;
   if (ratio < 0.9) {
-    return { ok: false, reason: `sequence content is only ${(ratio * 100).toFixed(1)}% ACGTN` };
+    return { ok: false, reason: `序列中 A/C/G/T/N 比例只有 ${(ratio * 100).toFixed(1)}%` };
   }
   return { ok: true };
 }

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, hasPublicSupabaseConfig } from "@/lib/supabase/server";
 
 // Magic-link redirect target. Handles both Supabase auth flows:
 //   - PKCE / OAuth code:        ?code=...
@@ -12,6 +12,12 @@ export async function GET(request: NextRequest) {
   const tokenHash = url.searchParams.get("token_hash");
   const type = url.searchParams.get("type") as EmailOtpType | null;
   const next = url.searchParams.get("next") ?? "/jobs";
+
+  if (!hasPublicSupabaseConfig()) {
+    return NextResponse.redirect(
+      new URL(`/login?error=${encodeURIComponent("Supabase 公开认证配置未设置")}`, url.origin),
+    );
+  }
 
   const supabase = await createClient();
 
@@ -31,7 +37,7 @@ export async function GET(request: NextRequest) {
     }
   } else {
     return NextResponse.redirect(
-      new URL(`/login?error=${encodeURIComponent("Missing auth parameters in callback URL")}`, url.origin),
+      new URL(`/login?error=${encodeURIComponent("登录回调缺少必要参数")}`, url.origin),
     );
   }
 

@@ -58,6 +58,74 @@ def update_job(supa: Client, job_id: str, **fields: Any) -> None:
     supa.table("jobs").update(fields).eq("id", job_id).execute()
 
 
+@_retry
+def list_job_genomes(supa: Client, job_id: str) -> list[dict[str, Any]]:
+    res = (
+        supa.table("genomes")
+        .select("*")
+        .eq("job_id", job_id)
+        .order("genome_name")
+        .execute()
+    )
+    return res.data or []
+
+
+@_retry
+def update_genome(supa: Client, genome_id: str, **fields: Any) -> None:
+    supa.table("genomes").update(fields).eq("id", genome_id).execute()
+
+
+@_retry
+def upsert_job_artifact(
+    supa: Client,
+    *,
+    job_id: str,
+    genome_id: str | None,
+    kind: str,
+    storage_path: str,
+    content_type: str,
+    bytes_size: int | None,
+) -> None:
+    supa.table("job_artifacts").upsert(
+        {
+            "job_id": job_id,
+            "genome_id": genome_id,
+            "kind": kind,
+            "storage_path": storage_path,
+            "content_type": content_type,
+            "bytes": bytes_size,
+        },
+        on_conflict="job_id,genome_id,kind",
+    ).execute()
+
+
+@_retry
+def insert_region_rows(supa: Client, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    inserted: list[dict[str, Any]] = []
+    for i in range(0, len(rows), 200):
+        res = supa.table("regions").insert(rows[i : i + 200]).execute()
+        inserted.extend(res.data or [])
+    return inserted
+
+
+@_retry
+def insert_cds_rows(supa: Client, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    for i in range(0, len(rows), 500):
+        supa.table("cds_features").insert(rows[i : i + 500]).execute()
+
+
+@_retry
+def insert_pfam_rows(supa: Client, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    for i in range(0, len(rows), 1000):
+        supa.table("pfam_hits").insert(rows[i : i + 1000]).execute()
+
+
 def _opt_float(v: Any) -> float | None:
     if v is None or v == "":
         return None

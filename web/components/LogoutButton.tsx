@@ -15,7 +15,7 @@ export function LogoutButton() {
       }}
       className="text-sm hover:underline"
     >
-      Sign out
+      退出
     </button>
   );
 }

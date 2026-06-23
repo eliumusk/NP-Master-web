@@ -3,11 +3,36 @@ import { cookies } from "next/headers";
 
 type CookieToSet = { name: string; value: string; options?: CookieOptions };
 
+export function getPublicSupabaseKey() {
+  return process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+    ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    ?? "";
+}
+
+export function hasPublicSupabaseConfig() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = getPublicSupabaseKey();
+  return !!url && !!key && !url.includes("YOUR-PROJECT") && key !== "ey..." && key.length > 20;
+}
+
+export async function getOptionalUser() {
+  if (!hasPublicSupabaseConfig()) return null;
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    return user;
+  } catch {
+    return null;
+  }
+}
+
 export async function createClient() {
   const cookieStore = await cookies();
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    (process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes("YOUR-PROJECT")
+      ? process.env.NEXT_PUBLIC_SUPABASE_URL
+      : process.env.SUPABASE_URL)!,
+    getPublicSupabaseKey(),
     {
       cookies: {
         getAll() {

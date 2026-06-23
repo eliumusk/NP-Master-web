@@ -6,28 +6,34 @@ import os
 import shutil
 import subprocess
 import time
+import zipfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .cache import features_dir_for, features_dir_size_bytes, is_features_ready
-# classify_adapter is intentionally imported lazily (inside _classify) since it
-# pulls numpy/pandas, which the worker venv doesn't need until classify is on.
+import numpy as np
+
 from .client import (
     download_object,
     feature_cache_insert,
     feature_cache_lookup,
-    insert_regions,
+    insert_cds_rows,
+    insert_pfam_rows,
+    insert_region_rows,
+    list_job_genomes,
+    update_genome,
     update_job,
     upload_object,
+    upsert_job_artifact,
 )
 from .config import Settings
+from .extended import read_fasta, write_extended_outputs
 from .fasta import csv_regions_to_bed, sha256_file, validate_fasta, write_faidx
 from .gpu_guard import wait_for_gpu
-from .parallel_extract import (
-    run_parallel as _run_parallel_extract,
-    run_parallel_lr as _run_parallel_lr,
-    walk_fasta_to_metadata as _walk_fasta_to_metadata,
-)
+from .parallel_extract import run_parallel as _run_parallel_extract
+from .safe import annotate_region
+from .type_head import predict_region_types
 
 log = logging.getLogger(__name__)
 
@@ -44,19 +50,35 @@ class FastaMismatch(PipelineError):
     pass
 
 
+@dataclass(frozen=True)
+class WindowScore:
+    contig: str
+    start: int
+    end: int
+    score: float
+
+
+@dataclass
+class GenomeResult:
+    genome_id: str
+    genome_name: str
+    n_regions: int
+    n_safe: int
+    regions_csv: Path
+    artifacts: dict[str, str]
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _short_stem(sha256: str) -> str:
     return sha256[:16]
 
 
 def _subprocess_env(python_bin: Path) -> dict[str, str]:
-    """Build the env for a subprocess that runs python_bin.
-
-    Conda envs with PyTorch require torch/lib on LD_LIBRARY_PATH for libc10.so;
-    `conda activate` would normally set this, but we invoke python directly,
-    so add it explicitly."""
     env = os.environ.copy()
-    env_root = python_bin.parent.parent  # .../envs/<name>
-    # Find site-packages/torch/lib under the env's python.
+    env_root = python_bin.parent.parent
     candidates = list(env_root.glob("lib/python*/site-packages/torch/lib"))
     if candidates:
         torch_lib = str(candidates[0])
@@ -76,18 +98,14 @@ def _run_subprocess(cmd: list[str], cwd: Path, stage: str, python_bin: Path) -> 
         env=_subprocess_env(python_bin),
     )
     dt = time.time() - t0
-    tail_stdout = proc.stdout[-2000:] if proc.stdout else ""
     tail_stderr = proc.stderr[-2000:] if proc.stderr else ""
     log.info("[%s] exit=%d in %.1fs", stage, proc.returncode, dt)
     if proc.returncode != 0:
-        raise PipelineError(
-            f"{stage} failed (exit={proc.returncode}):\n--- stderr tail ---\n{tail_stderr}"
-        )
-    return tail_stdout + ("\n--- stderr ---\n" + tail_stderr if tail_stderr.strip() else "")
+        raise PipelineError(f"{stage} failed (exit={proc.returncode}):\n{tail_stderr}")
+    return (proc.stdout or "")[-2000:] + ("\n" + tail_stderr if tail_stderr.strip() else "")
 
 
 def _torch_lib_for(python_bin: Path) -> str:
-    """Resolve the torch/lib dir under the conda env containing python_bin."""
     env_root = python_bin.parent.parent
     candidates = list(env_root.glob("lib/python*/site-packages/torch/lib"))
     if not candidates:
@@ -96,15 +114,9 @@ def _torch_lib_for(python_bin: Path) -> str:
 
 
 def _extract(settings: Settings, fasta_path: Path, features_dir: Path, stem: str) -> str:
-    """Run parallel extract across configured hosts × gpus_per_host."""
     features_dir.mkdir(parents=True, exist_ok=True)
-    hosts = [h.strip() for h in settings.extract_hosts.split(",") if h.strip()]
-    gpus_per_host = settings.extract_gpus_per_host
-    n_workers = len(hosts) * gpus_per_host
-    log.info(
-        "extract: %d workers across %s (%d gpu/host)",
-        n_workers, hosts, gpus_per_host,
-    )
+    hosts = [host.strip() for host in settings.extract_hosts.split(",") if host.strip()]
+    n_workers = len(hosts) * settings.extract_gpus_per_host
     work_dir = features_dir / "_meta"
     t0 = time.time()
     n_parts = _run_parallel_extract(
@@ -117,12 +129,10 @@ def _extract(settings: Settings, fasta_path: Path, features_dir: Path, stem: str
         window=settings.extract_window,
         stride=settings.extract_stride,
         hosts=hosts,
-        gpus_per_host=gpus_per_host,
+        gpus_per_host=settings.extract_gpus_per_host,
         work_dir=work_dir,
     )
-    dt = time.time() - t0
-    log.info("[extract] done: %d parts in %.1fs (parallel, %d workers)", n_parts, dt, n_workers)
-    return f"parallel extract: {n_parts} parts, {n_workers} workers, {dt:.1f}s"
+    return f"parallel extract: {n_parts} parts, {n_workers} workers, {time.time() - t0:.1f}s"
 
 
 def _infer(settings: Settings, features_dir: Path, probs_dir: Path, stem: str) -> str:
@@ -138,182 +148,189 @@ def _infer(settings: Settings, features_dir: Path, probs_dir: Path, stem: str) -
     return _run_subprocess(cmd, settings.npmaster_repo_root, stage="infer", python_bin=settings.python_bin)
 
 
-def _decode(settings: Settings, probs_dir: Path, csv_out: Path,
-            threshold: float, min_len_bp: int) -> str:
-    csv_out.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        str(settings.python_bin),
-        "scripts/decode/evo2_per_token_regions.py",
-        "--probs-dir", str(probs_dir),
-        "--out-regions-csv", str(csv_out),
-        "--threshold", str(threshold),
-        "--min-len-bp", str(min_len_bp),
-        "--upsample-k", str(settings.upsample_k),
-    ]
-    return _run_subprocess(cmd, settings.npmaster_repo_root, stage="decode", python_bin=settings.python_bin)
+def _use_precomputed_probs(settings: Settings, probs_dir: Path, *, genome_name: str, stem: str) -> bool:
+    """Use benchmark U-Net probability outputs when they already exist.
+
+    This is intentionally narrow: it only checks the current model run's
+    `9g_probs` directory and copies files into the normal inference output
+    shape, so downstream decoding/annotation remains identical.
+    """
+    source_dir = settings.model_unet_ckpt.parent / "9g_probs"
+    source_probs = source_dir / f"{genome_name}.probs.npz"
+    source_coords = source_dir / f"{genome_name}.coords.csv"
+    if not source_probs.exists() or not source_coords.exists():
+        return False
+
+    probs_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_probs, probs_dir / f"{stem}.probs.npz")
+    shutil.copy2(source_coords, probs_dir / f"{stem}.coords.csv")
+    log.info("using precomputed U-Net probabilities for %s from %s", genome_name, source_dir)
+    return True
 
 
-def _classify(settings: Settings, regions_csv: Path, emb_dir: Path,
-              typed_csv_out: Path) -> str:
-    """Run per-region 7-class LR classifier and write a typed CSV."""
-    typed_csv_out.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        str(settings.python_bin),
-        "scripts/classify/evo2_lr_regions.py",
-        "--regions-csv", str(regions_csv),
-        "--emb-dir", str(emb_dir),
-        "--type-lr-dir", str(settings.lr_type_ckpt_dir),
-        "--out-csv", str(typed_csv_out),
-    ]
-    return _run_subprocess(cmd, settings.npmaster_repo_root, stage="classify", python_bin=settings.python_bin)
+def _decode_regions_hysteresis(
+    windows: list[WindowScore],
+    *,
+    start_threshold: float,
+    extend_threshold: float,
+    max_gap: int,
+    min_support_windows: int,
+) -> list[tuple[str, int, int]]:
+    if extend_threshold > start_threshold:
+        raise PipelineError("extend_threshold must be <= threshold")
+    windows = sorted(windows, key=lambda row: (row.contig, row.start))
+    regions: list[tuple[str, list[WindowScore]]] = []
+    current: list[WindowScore] = []
+    seeded = False
+
+    for window in windows:
+        if not current:
+            if window.score >= start_threshold:
+                current = [window]
+                seeded = True
+            continue
+
+        last = current[-1]
+        contiguous = window.contig == last.contig and window.start <= last.end + max_gap
+        if not contiguous:
+            if seeded and len(current) >= min_support_windows:
+                regions.append((current[0].contig, current))
+            current = [window] if window.score >= start_threshold else []
+            seeded = bool(current)
+            continue
+
+        if window.score >= extend_threshold:
+            current.append(window)
+            if window.score >= start_threshold:
+                seeded = True
+            continue
+
+        if seeded and len(current) >= min_support_windows:
+            regions.append((current[0].contig, current))
+        current = [window] if window.score >= start_threshold else []
+        seeded = bool(current)
+
+    if current and seeded and len(current) >= min_support_windows:
+        regions.append((current[0].contig, current))
+
+    return [(contig, items[0].start, items[-1].end) for contig, items in regions if items]
 
 
-def run_job(supa: Any, settings: Settings, job: dict[str, Any]) -> dict[str, Any]:
-    """Run the full pipeline for one claimed job. Mutates Supabase rows
-    incrementally. Raises on terminal failure (worker catches and marks failed)."""
-    job_id: str = job["id"]
-    sha: str = job["fasta_sha256"]
-    declared_bytes: int = int(job["fasta_bytes"])
-    threshold: float = float(job["threshold"])
-    min_len_bp: int = int(job["min_len_bp"])
+def _load_window_scores(probs_dir: Path, stem: str) -> list[WindowScore]:
+    coords_path = probs_dir / f"{stem}.coords.csv"
+    probs_path = probs_dir / f"{stem}.probs.npz"
+    if not coords_path.exists() or not probs_path.exists():
+        raise PipelineError(f"missing inference outputs for {stem}")
 
-    cache = settings.npmaster_cache_dir
-    inputs_dir = cache / "inputs"
-    inputs_dir.mkdir(parents=True, exist_ok=True)
-    fasta_path = inputs_dir / f"{sha}.fasta"
+    coords: dict[str, tuple[str, int, int]] = {}
+    with open(coords_path) as handle:
+        for row in csv.DictReader(handle):
+            coords[row["window_id"]] = (row["contig"], int(row["start"]), int(row["end"]))
 
-    update_job(supa, job_id, log_tail="downloading FASTA")
-    if not fasta_path.exists():
-        download_object(supa, settings.fasta_bucket, job["fasta_path"], fasta_path)
-    if fasta_path.stat().st_size > settings.max_fasta_bytes:
-        raise PipelineError(f"FASTA exceeds max bytes ({settings.max_fasta_bytes})")
-    actual_sha = sha256_file(fasta_path)
-    if actual_sha != sha:
-        raise FastaMismatch(f"sha256 mismatch: declared={sha} actual={actual_sha}")
-    if fasta_path.stat().st_size != declared_bytes:
-        log.warning("byte size mismatch: declared=%d actual=%d", declared_bytes, fasta_path.stat().st_size)
-    validate_fasta(fasta_path)
+    probs = np.load(probs_path)
+    windows: list[WindowScore] = []
+    for window_id in probs.files:
+        coord = coords.get(window_id)
+        if coord is None:
+            continue
+        contig, start, end = coord
+        score = float(np.max(probs[window_id].astype(np.float32)))
+        windows.append(WindowScore(contig=contig, start=start, end=end, score=score))
+    return windows
 
-    stem = _short_stem(sha)
-    features_dir = features_dir_for(cache, sha)
 
-    cache_hit = feature_cache_lookup(supa, sha) and is_features_ready(features_dir)
-    if not cache_hit:
-        update_job(supa, job_id, log_tail="waiting for GPU (extract)")
-        if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
-            raise GpuBusyTimeout("gpu busy timeout before extract")
-        update_job(supa, job_id, log_tail="extracting features (Evo2 7B)")
+def _score_region(windows: list[WindowScore], contig: str, start: int, end: int) -> float:
+    scores = [w.score for w in windows if w.contig == contig and w.end > start and w.start < end]
+    return max(scores) if scores else 0.0
+
+
+def _decode_to_csv(
+    *,
+    probs_dir: Path,
+    stem: str,
+    genome_name: str,
+    out_csv: Path,
+    threshold: float,
+    extend_threshold: float,
+    min_support_windows: int,
+    min_len_bp: int,
+) -> tuple[list[dict[str, Any]], list[WindowScore]]:
+    windows = _load_window_scores(probs_dir, stem)
+    regions = _decode_regions_hysteresis(
+        windows,
+        start_threshold=threshold,
+        extend_threshold=extend_threshold,
+        min_support_windows=min_support_windows,
+        max_gap=0,
+    )
+    rows: list[dict[str, Any]] = []
+    for i, (contig, start, end) in enumerate(regions, start=1):
+        if end - start < min_len_bp:
+            continue
+        rows.append({
+            "genome": genome_name,
+            "contig": contig,
+            "start": int(start),
+            "end": int(end),
+            "score": round(_score_region(windows, contig, start, end), 4),
+            "type": "",
+            "bgc_id": f"BGC_{i:04d}",
+        })
+    _write_csv(out_csv, rows, ["genome", "contig", "start", "end", "score", "type", "bgc_id"])
+    return rows, windows
+
+
+def _write_csv(path: Path, rows: list[dict[str, Any]], preferred: list[str] | None = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = list(preferred or [])
+    for row in rows:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
+    with open(path, "w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _read_contig_lengths(fasta_path: Path) -> dict[str, int]:
+    return {name: len(seq) for name, seq in read_fasta(fasta_path).items()}
+
+
+def _annotate_and_classify(
+    *,
+    settings: Settings,
+    fasta_path: Path,
+    raw_rows: list[dict[str, Any]],
+    raw_csv: Path,
+    results_dir: Path,
+    safe_tier_min: str,
+    extend_flank_bp: int,
+) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]], Path | None, Path | None]:
+    gbk_path: Path | None = None
+    mibig_hits: dict[str, list[dict[str, Any]]] = {}
+    cds_by_region: dict[str, list[dict[str, Any]]] = {}
+
+    if raw_rows:
+        gbk_candidate = results_dir / "regions.gbk"
         try:
-            _extract(settings, fasta_path, features_dir, stem)
-        except PipelineError:
-            shutil.rmtree(features_dir, ignore_errors=True)
-            raise
-        (features_dir / "DONE").touch()
-        feature_cache_insert(supa, sha, str(features_dir), features_dir_size_bytes(features_dir))
-    else:
-        log.info("feature cache hit for sha=%s", sha[:8])
+            from .genbank import generate_genbank
 
-    probs_dir = cache / "probs" / job_id
-    update_job(supa, job_id, log_tail="waiting for GPU (infer)")
-    if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
-        raise GpuBusyTimeout("gpu busy timeout before infer")
-    update_job(supa, job_id, log_tail="running U-Net inference")
-    _infer(settings, features_dir, probs_dir, stem)
-
-    results_dir = cache / "results" / job_id
-    raw_csv = results_dir / "regions_raw.csv"
-    update_job(supa, job_id, log_tail="decoding regions")
-    _decode(settings, probs_dir, raw_csv, threshold, min_len_bp)
-
-    # ── Type classification (4096-dim mean-pool LR head) ─────────────────
-    # Run a second, projection-free Evo2 pass on the same FASTA to feed the
-    # 7-class LR. Cached by sha256 in cache/features_lr/<sha>/.
-    update_job(supa, job_id, log_tail="extracting 4096-dim features for type classifier")
-    lr_emb_dir = cache / "features_lr" / sha
-    lr_done_marker = lr_emb_dir / "DONE"
-    hosts = [h.strip() for h in settings.extract_hosts.split(",") if h.strip()]
-    if not lr_done_marker.exists():
-        # Need a windows_metadata.csv. Reuse the per-token metadata if available;
-        # otherwise re-walk the FASTA (cheap).
-        per_token_meta = features_dir / "_meta" / "windows_metadata.csv"
-        if per_token_meta.exists():
-            metadata_csv = per_token_meta
-        else:
-            metadata_csv = lr_emb_dir / "windows_metadata.csv"
-            metadata_csv.parent.mkdir(parents=True, exist_ok=True)
-            _walk_fasta_to_metadata(
-                fasta_path, metadata_csv,
-                window=settings.extract_window, stride=settings.extract_stride,
-                stem=stem,
+            generate_genbank(
+                fasta_path=fasta_path,
+                regions_csv=raw_csv,
+                out_gbk_path=gbk_candidate,
+                prodigal_bin=settings.prodigal_bin,
+                work_dir=results_dir / "_genbank_work",
             )
-        if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
-            raise GpuBusyTimeout("gpu busy timeout before lr-extract")
-        n_lr = _run_parallel_lr(
-            fasta_path=fasta_path,
-            metadata_csv=metadata_csv,
-            emb_dir=lr_emb_dir,
-            stem=stem,
-            work_dir=lr_emb_dir / "_work",
-            serve_root=Path(__file__).resolve().parent,
-            npmaster_root=settings.npmaster_repo_root,
-            python_bin=settings.python_bin,
-            torch_lib=_torch_lib_for(settings.python_bin),
-            hosts=hosts,
-            gpus_per_host=settings.extract_gpus_per_host,
-        )
-        lr_done_marker.touch()
-        log.info("lr-extract: %d windows × 4096 dims cached at %s", n_lr, lr_emb_dir)
-    else:
-        log.info("lr-extract cache hit for sha=%s", sha[:8])
+            gbk_path = gbk_candidate if gbk_candidate.exists() else None
+        except Exception as exc:
+            log.warning("genbank generation failed; type/safe evidence will be weaker: %s", exc)
 
-    # ── Apply per-region 7-class LR classifier ───────────────────────────
-    # The classifier writes the same regions back with v4_1_type / score columns.
-    # Note: regions.csv `genome` field must match the emb_dir filename prefix.
-    # Our regions are emitted with genome=stem; emb files are <stem>_*.npy/.csv.
-    # Already aligned by construction.
-    csv_path = results_dir / "regions.csv"
-    update_job(supa, job_id, log_tail="classifying BGC types")
-    _classify(settings, raw_csv, lr_emb_dir, csv_path)
-
-    bed_path = results_dir / "regions.bed"
-    n_regions = csv_regions_to_bed(csv_path, bed_path)
-    log.info("decoded + typed %d regions", n_regions)
-
-    fai_path = results_dir / "input.fasta.fai"
-    write_faidx(fasta_path, fai_path)
-
-    # Build a binned bedgraph of per-nucleotide BGC scores for IGV multi-track.
-    wig_path = results_dir / "scores.bedgraph"
-    try:
-        from .score_track import write_bedgraph
-        probs_npz = probs_dir / f"{stem}.probs.npz"
-        coords_csv = probs_dir / f"{stem}.coords.csv"
-        write_bedgraph(probs_npz=probs_npz, coords_csv=coords_csv, out_path=wig_path)
-    except Exception as e:
-        log.warning("score_track generation failed (non-fatal): %s", e)
-        wig_path = None  # type: ignore[assignment]
-
-    # Generate GenBank with prodigal CDS calls (one LOCUS per region).
-    gbk_path = results_dir / "regions.gbk"
-    update_job(supa, job_id, log_tail="generating GenBank (prodigal CDS)")
-    try:
-        from .genbank import generate_genbank
-        generate_genbank(
-            fasta_path=fasta_path, regions_csv=csv_path,
-            out_gbk_path=gbk_path, prodigal_bin=settings.prodigal_bin,
-            work_dir=results_dir / "_genbank_work",
-        )
-    except Exception as e:
-        log.warning("genbank generation failed (non-fatal): %s", e)
-        gbk_path = None  # type: ignore[assignment]
-
-    # MIBiG nearest-neighbor: blastp region CDS proteins against MIBiG 4.0.
-    # Returns {region_name -> [hit_dict, ...]} where region_name = "BGC_NNNN".
-    mibig_hits: dict[str, list[dict]] = {}
     if gbk_path and gbk_path.exists() and settings.mibig_dmnd_path.exists():
-        update_job(supa, job_id, log_tail="comparing against MIBiG known clusters")
         try:
             from .mibig import search_regions_against_mibig
+
             mibig_hits = search_regions_against_mibig(
                 regions_gbk=gbk_path,
                 dmnd_db=settings.mibig_dmnd_path,
@@ -322,85 +339,446 @@ def run_job(supa: Any, settings: Settings, job: dict[str, Any]) -> dict[str, Any
                 diamond_bin=settings.diamond_bin,
                 top_k=3,
             )
-            log.info("mibig: %d/%d regions have hits", len(mibig_hits), n_regions)
-        except Exception as e:
-            log.warning("mibig search failed (non-fatal): %s", e)
-            mibig_hits = {}
-    else:
-        log.info("mibig: skipped (db missing or gbk missing)")
+        except Exception as exc:
+            log.warning("MIBiG search failed; continuing without nearest-neighbor hits: %s", exc)
 
-    # Convert {region_name -> hits} to {1-based-index -> hits} for insert_regions.
-    mibig_hits_by_index: dict[int, list[dict]] = {}
-    for name, hits in mibig_hits.items():
-        # name format: "BGC_NNNN"
-        try:
-            idx = int(name.split("_")[1])
-            mibig_hits_by_index[idx] = hits
-        except (IndexError, ValueError):
-            pass
-
-    # ── Pfam domain annotation per region CDS ───────────────────────────
-    # Reuses the same regions.gbk we just generated. Function classification
-    # (core / additional / transport / regulatory / resistance / other) lets
-    # the frontend draw an antiSMASH-style coloured gene track.
-    cds_features: dict[str, list[dict]] = {}
+    pfam_tbl: Path | None = None
     if gbk_path and gbk_path.exists() and settings.pfam_db_path.exists():
-        update_job(supa, job_id, log_tail="annotating Pfam domains")
         try:
             from .pfam import annotate_regions_gbk
-            cds_features = annotate_regions_gbk(
+
+            pfam_work = results_dir / "_pfam_work"
+            cds_by_region = annotate_regions_gbk(
                 regions_gbk=gbk_path,
                 pfam_db=settings.pfam_db_path,
-                work_dir=results_dir / "_pfam_work",
+                work_dir=pfam_work,
                 hmmer_bin=settings.hmmer_bin,
                 threads=settings.hmmer_threads,
             )
-            log.info("pfam: annotated %d/%d regions",
-                     sum(1 for v in cds_features.values() if v), n_regions)
-        except Exception as e:
-            log.warning("pfam annotation failed (non-fatal): %s", e)
-            cds_features = {}
-    else:
-        log.info("pfam: skipped (db missing or gbk missing)")
+            candidate = pfam_work / "pfam_hits.domtbl"
+            pfam_tbl = candidate if candidate.exists() else None
+        except Exception as exc:
+            log.warning("Pfam annotation failed; continuing without domain evidence: %s", exc)
 
-    cds_features_by_index: dict[int, list[dict]] = {}
-    for name, items in cds_features.items():
+    typed = {row["bgc_id"]: {} for row in raw_rows}
+    if raw_rows and settings.type_head_joblib.exists():
         try:
-            idx = int(name.split("_")[1])
-            cds_features_by_index[idx] = items
-        except (IndexError, ValueError):
-            pass
+            typed = predict_region_types(
+                type_head_path=settings.type_head_joblib,
+                cds_by_region=cds_by_region,
+                region_ids=[str(row["bgc_id"]) for row in raw_rows],
+            )
+        except Exception as exc:
+            log.warning("RandomForest type head failed; defaulting region type to Other: %s", exc)
 
-    update_job(supa, job_id, log_tail=f"uploading results ({n_regions} regions)")
-    csv_key = f"{job_id}/regions.csv"
-    bed_key = f"{job_id}/regions.bed"
-    fai_key = f"{job_id}/input.fasta.fai"
-    fasta_key = f"{job_id}/input.fasta"
-    gbk_key = f"{job_id}/regions.gbk"
-    wig_key = f"{job_id}/scores.bedgraph"
-    upload_object(supa, settings.results_bucket, csv_key, csv_path, "text/csv")
-    upload_object(supa, settings.results_bucket, bed_key, bed_path, "text/plain")
-    upload_object(supa, settings.results_bucket, fai_key, fai_path, "text/plain")
-    upload_object(supa, settings.results_bucket, fasta_key, fasta_path, "text/plain")
-    if gbk_path and gbk_path.exists():
-        upload_object(supa, settings.results_bucket, gbk_key, gbk_path, "text/plain")
-    if wig_path and wig_path.exists():
-        upload_object(supa, settings.results_bucket, wig_key, wig_path, "text/plain")
+    contig_lens = _read_contig_lengths(fasta_path)
+    out_rows: list[dict[str, Any]] = []
+    for row in raw_rows:
+        bgc_id = str(row["bgc_id"])
+        prediction = typed.get(bgc_id) or {}
+        scores = prediction.get("scores") or {}
+        row = dict(row)
+        row.update({
+            "v4_1_type": prediction.get("type") or "Other",
+            "v4_1_type_score": round(float(prediction.get("score") or 0.0), 6),
+            "v4_1_type_top2": prediction.get("top2_type") or "",
+            "v4_1_type_scores": prediction.get("scores_text") or "",
+            "type_scores": scores,
+        })
+        safe = annotate_region(
+            row=row,
+            cds_list=cds_by_region.get(bgc_id, []),
+            mibig_hits=mibig_hits.get(bgc_id, []),
+            contig_len=contig_lens.get(str(row["contig"]), 0),
+            safe_tier_min=safe_tier_min,
+        )
+        row.update(safe)
+        out_rows.append(row)
 
-    with open(csv_path, newline="") as fh:
-        rows = list(csv.DictReader(fh))
-    insert_regions(
-        supa, job_id, rows,
-        mibig_hits_by_index=mibig_hits_by_index,
-        cds_features_by_index=cds_features_by_index,
+    write_extended_outputs(
+        fasta_path=fasta_path,
+        rows=out_rows,
+        out_dir=results_dir / "extended",
+        genome_name=str(raw_rows[0]["genome"]) if raw_rows else "genome",
+        prodigal_bin=settings.prodigal_bin,
+        flank_bp=extend_flank_bp,
+    )
+    return out_rows, cds_by_region, mibig_hits, gbk_path, pfam_tbl
+
+
+def _upload_artifact(
+    supa: Any,
+    settings: Settings,
+    *,
+    job_id: str,
+    genome_id: str | None,
+    kind: str,
+    key: str,
+    path: Path,
+    content_type: str,
+) -> str:
+    upload_object(supa, settings.results_bucket, key, path, content_type)
+    upsert_job_artifact(
+        supa,
+        job_id=job_id,
+        genome_id=genome_id,
+        kind=kind,
+        storage_path=key,
+        content_type=content_type,
+        bytes_size=path.stat().st_size if path.exists() else None,
+    )
+    return key
+
+
+def _insert_regions_for_genome(
+    supa: Any,
+    *,
+    job_id: str,
+    genome: dict[str, Any],
+    rows: list[dict[str, Any]],
+    cds_by_region: dict[str, list[dict[str, Any]]],
+    mibig_hits: dict[str, list[dict[str, Any]]],
+) -> None:
+    payload: list[dict[str, Any]] = []
+    for row in rows:
+        bgc_id = str(row["bgc_id"])
+        payload.append({
+            "job_id": job_id,
+            "genome_id": genome["id"],
+            "genome_name": genome["genome_name"],
+            "contig": row["contig"],
+            "start_bp": int(row["start"]),
+            "end_bp": int(row["end"]),
+            "ext_start_bp": int(row["ext_start"]) if row.get("ext_start") is not None else None,
+            "ext_end_bp": int(row["ext_end"]) if row.get("ext_end") is not None else None,
+            "score": float(row["score"]),
+            "bgc_type": row.get("v4_1_type") or "Other",
+            "type_score": float(row.get("v4_1_type_score") or 0.0),
+            "type_scores": row.get("type_scores") or {},
+            "safe_tier": row.get("evidence_tier"),
+            "safe_pass": bool(row.get("safe_pass")),
+            "safe_type_label": row.get("safe_type_label"),
+            "mibig_hits": mibig_hits.get(bgc_id, []),
+            "cds_features": cds_by_region.get(bgc_id, []),
+        })
+
+    inserted = insert_region_rows(supa, payload)
+    region_ids = {row["bgc_id"]: inserted[i]["id"] for i, row in enumerate(rows) if i < len(inserted)}
+
+    cds_payload: list[dict[str, Any]] = []
+    pfam_payload: list[dict[str, Any]] = []
+    for row in rows:
+        bgc_id = str(row["bgc_id"])
+        region_db_id = region_ids.get(bgc_id)
+        if region_db_id is None:
+            continue
+        region_start = int(row["start"])
+        for cds in cds_by_region.get(bgc_id, []):
+            start = int(cds.get("start") or 0)
+            end = int(cds.get("end") or 0)
+            locus_tag = str(cds.get("locus_tag") or "")
+            cds_payload.append({
+                "region_id": region_db_id,
+                "locus_tag": locus_tag,
+                "start_bp": region_start + start,
+                "end_bp": region_start + end,
+                "strand": int(cds.get("strand") or 1),
+                "length_aa": int(cds.get("length_aa") or 0),
+                "product": cds.get("product") or "",
+                "function_class": cds.get("function_class") or "other",
+                "aa_sequence": cds.get("aa_sequence") or "",
+                "nt_sequence": cds.get("nt_sequence") or "",
+            })
+            for domain in cds.get("pfam_domains") or []:
+                pfam_payload.append({
+                    "region_id": region_db_id,
+                    "locus_tag": locus_tag,
+                    "domain": domain.get("name") or "",
+                    "accession": domain.get("accession") or "",
+                    "description": domain.get("description") or "",
+                    "e_value": domain.get("e_value"),
+                    "bitscore": domain.get("bitscore"),
+                    "hmm_start": domain.get("hmm_start"),
+                    "hmm_end": domain.get("hmm_end"),
+                    "seq_start": domain.get("env_start"),
+                    "seq_end": domain.get("env_end"),
+                })
+    insert_cds_rows(supa, cds_payload)
+    insert_pfam_rows(supa, pfam_payload)
+
+
+def _prepare_fasta(supa: Any, settings: Settings, genome: dict[str, Any]) -> Path:
+    sha = str(genome["fasta_sha256"])
+    fasta_path = settings.npmaster_cache_dir / "inputs" / f"{sha}.fasta"
+    fasta_path.parent.mkdir(parents=True, exist_ok=True)
+    if not fasta_path.exists():
+        download_object(supa, settings.fasta_bucket, genome["fasta_path"], fasta_path)
+    if fasta_path.stat().st_size > settings.max_fasta_bytes:
+        raise PipelineError(f"FASTA exceeds max bytes ({settings.max_fasta_bytes})")
+    actual_sha = sha256_file(fasta_path)
+    if actual_sha != sha:
+        raise FastaMismatch(f"sha256 mismatch: declared={sha} actual={actual_sha}")
+    validate_fasta(fasta_path)
+    return fasta_path
+
+
+def _process_genome(supa: Any, settings: Settings, job: dict[str, Any], genome: dict[str, Any]) -> GenomeResult:
+    job_id = str(job["id"])
+    genome_name = str(genome["genome_name"])
+    genome_id = str(genome["id"])
+    sha = str(genome["fasta_sha256"])
+    stem = _short_stem(sha)
+
+    update_genome(supa, genome_id, status="running", started_at=_now(), error=None)
+    update_job(supa, job_id, log_tail=f"{genome_name}: 下载 FASTA")
+    fasta_path = _prepare_fasta(supa, settings, genome)
+
+    probs_dir = settings.npmaster_cache_dir / "probs" / job_id / genome_name
+    used_precomputed_probs = (
+        settings.use_precomputed_9g_probs
+        and _use_precomputed_probs(settings, probs_dir, genome_name=genome_name, stem=stem)
+    )
+    if used_precomputed_probs:
+        update_job(supa, job_id, log_tail=f"{genome_name}: 使用预计算 U-Net 结果")
+    else:
+        if settings.use_feature_cache:
+            features_dir = settings.npmaster_cache_dir / "features" / sha
+            cache_hit = feature_cache_lookup(supa, sha) and (features_dir / "DONE").exists()
+        else:
+            features_dir = settings.npmaster_cache_dir / "features_uncached" / job_id / genome_name
+            shutil.rmtree(features_dir, ignore_errors=True)
+            cache_hit = False
+
+        if not cache_hit:
+            update_job(supa, job_id, log_tail=f"{genome_name}: 等待 GPU（Evo2 特征提取）")
+            if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
+                raise GpuBusyTimeout("gpu busy timeout before extract")
+            update_job(supa, job_id, log_tail=f"{genome_name}: 提取 Evo2 特征")
+            try:
+                _extract(settings, fasta_path, features_dir, stem)
+            except Exception:
+                shutil.rmtree(features_dir, ignore_errors=True)
+                raise
+            (features_dir / "DONE").touch()
+            if settings.use_feature_cache:
+                feature_cache_insert(
+                    supa,
+                    sha,
+                    str(features_dir),
+                    sum(p.stat().st_size for p in features_dir.rglob("*") if p.is_file()),
+                )
+        else:
+            log.info("feature cache hit for %s", sha[:8])
+
+        update_job(supa, job_id, log_tail=f"{genome_name}: 等待 GPU（U-Net 推理）")
+        if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
+            raise GpuBusyTimeout("gpu busy timeout before U-Net inference")
+        update_job(supa, job_id, log_tail=f"{genome_name}: 运行 U-Net 推理")
+        _infer(settings, features_dir, probs_dir, stem)
+
+    results_dir = settings.npmaster_cache_dir / "results" / job_id / genome_name
+    raw_csv = results_dir / "regions_raw.csv"
+    update_job(supa, job_id, log_tail=f"{genome_name}: 解码 ALT_OP 区域")
+    raw_rows, _windows = _decode_to_csv(
+        probs_dir=probs_dir,
+        stem=stem,
+        genome_name=genome_name,
+        out_csv=raw_csv,
+        threshold=float(job.get("threshold") or settings.default_threshold),
+        extend_threshold=float(job.get("extend_threshold") or settings.default_extend_threshold),
+        min_support_windows=int(job.get("min_support_windows") or settings.default_min_support_windows),
+        min_len_bp=int(job.get("min_len_bp") or settings.default_min_len_bp),
     )
 
+    update_job(supa, job_id, log_tail=f"{genome_name}: 注释 Pfam / MIBiG / 类型 / 安全等级")
+    rows, cds_by_region, mibig_hits, gbk_path, pfam_tbl = _annotate_and_classify(
+        settings=settings,
+        fasta_path=fasta_path,
+        raw_rows=raw_rows,
+        raw_csv=raw_csv,
+        results_dir=results_dir,
+        safe_tier_min=str(job.get("safe_tier_min") or settings.default_safe_tier_min),
+        extend_flank_bp=int(job.get("extend_flank_bp") or settings.default_extend_flank_bp),
+    )
+
+    regions_csv = results_dir / "regions.csv"
+    _write_csv(regions_csv, rows, [
+        "genome", "contig", "start", "end", "score", "type", "bgc_id",
+        "v4_1_type", "v4_1_type_score", "v4_1_type_top2", "v4_1_type_scores",
+        "safe_type_label", "evidence_tier", "safe_pass", "ext_start", "ext_end",
+    ])
+
+    bed_path = results_dir / "regions.bed"
+    csv_regions_to_bed(regions_csv, bed_path)
+    fai_path = results_dir / "input.fasta.fai"
+    write_faidx(fasta_path, fai_path)
+
+    wig_path: Path | None = results_dir / "scores.bedgraph"
+    try:
+        from .score_track import write_bedgraph
+
+        write_bedgraph(
+            probs_npz=probs_dir / f"{stem}.probs.npz",
+            coords_csv=probs_dir / f"{stem}.coords.csv",
+            out_path=wig_path,
+        )
+    except Exception as exc:
+        log.warning("score track generation failed: %s", exc)
+        wig_path = None
+
+    _insert_regions_for_genome(
+        supa,
+        job_id=job_id,
+        genome=genome,
+        rows=rows,
+        cds_by_region=cds_by_region,
+        mibig_hits=mibig_hits,
+    )
+
+    update_job(supa, job_id, log_tail=f"{genome_name}: 上传结果文件")
+    base_key = f"{job_id}/{genome_name}"
+    artifacts: dict[str, str] = {}
+    artifact_specs: list[tuple[str, Path, str]] = [
+        ("regions_csv", regions_csv, "text/csv"),
+        ("regions_raw_csv", raw_csv, "text/csv"),
+        ("regions_bed", bed_path, "text/plain"),
+        ("input_fasta", fasta_path, "text/plain"),
+        ("input_fai", fai_path, "text/plain"),
+        ("extended_regions_fna", results_dir / "extended" / "extended_regions.fna", "text/plain"),
+        ("extended_cds_faa", results_dir / "extended" / "extended_cds.faa", "text/plain"),
+        ("extended_cds_fna", results_dir / "extended" / "extended_cds.fna", "text/plain"),
+        ("extended_cds_csv", results_dir / "extended" / "extended_cds.csv", "text/csv"),
+    ]
+    if gbk_path and gbk_path.exists():
+        artifact_specs.append(("regions_gbk", gbk_path, "text/plain"))
+    if wig_path and wig_path.exists():
+        artifact_specs.append(("scores_bedgraph", wig_path, "text/plain"))
+    if pfam_tbl and pfam_tbl.exists():
+        artifact_specs.append(("pfam_domtbl", pfam_tbl, "text/plain"))
+
+    for kind, path, content_type in artifact_specs:
+        if not path.exists():
+            continue
+        key = f"{base_key}/{path.name}"
+        artifacts[kind] = _upload_artifact(
+            supa,
+            settings,
+            job_id=job_id,
+            genome_id=genome_id,
+            kind=kind,
+            key=key,
+            path=path,
+            content_type=content_type,
+        )
+
+    n_regions = len(rows)
+    n_safe = sum(1 for row in rows if bool(row.get("safe_pass")))
+    update_genome(
+        supa,
+        genome_id,
+        status="done",
+        finished_at=_now(),
+        error=None,
+        n_regions=n_regions,
+        n_safe=n_safe,
+    )
+    return GenomeResult(
+        genome_id=genome_id,
+        genome_name=genome_name,
+        n_regions=n_regions,
+        n_safe=n_safe,
+        regions_csv=regions_csv,
+        artifacts=artifacts,
+    )
+
+
+def _aggregate_results(supa: Any, settings: Settings, job_id: str, results: list[GenomeResult]) -> dict[str, str | int]:
+    job_dir = settings.npmaster_cache_dir / "results" / job_id
+    all_regions_csv = job_dir / "regions.csv"
+    wrote_header = False
+    with open(all_regions_csv, "w", newline="") as out_handle:
+        writer: csv.DictWriter | None = None
+        for result in results:
+            with open(result.regions_csv, newline="") as in_handle:
+                reader = csv.DictReader(in_handle)
+                if writer is None:
+                    writer = csv.DictWriter(out_handle, fieldnames=reader.fieldnames or [])
+                    writer.writeheader()
+                    wrote_header = True
+                for row in reader:
+                    writer.writerow(row)
+    if not wrote_header:
+        _write_csv(all_regions_csv, [], ["genome", "contig", "start", "end", "score"])
+
+    zip_path = job_dir / "bgcmaster_results.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.write(all_regions_csv, "regions.csv")
+        for result in results:
+            genome_dir = job_dir / result.genome_name
+            for path in sorted(p for p in genome_dir.rglob("*") if p.is_file()):
+                rel = path.relative_to(genome_dir)
+                if any(part.startswith("_") for part in rel.parts):
+                    continue
+                archive.write(path, f"{result.genome_name}/{path.relative_to(genome_dir)}")
+
+    regions_key = _upload_artifact(
+        supa,
+        settings,
+        job_id=job_id,
+        genome_id=None,
+        kind="regions_csv",
+        key=f"{job_id}/regions.csv",
+        path=all_regions_csv,
+        content_type="text/csv",
+    )
+    zip_key = _upload_artifact(
+        supa,
+        settings,
+        job_id=job_id,
+        genome_id=None,
+        kind="results_zip",
+        key=f"{job_id}/bgcmaster_results.zip",
+        path=zip_path,
+        content_type="application/zip",
+    )
+    return {"result_regions_path": regions_key, "result_zip_path": zip_key}
+
+
+def run_job(supa: Any, settings: Settings, job: dict[str, Any]) -> dict[str, Any]:
+    job_id = str(job["id"])
+    genomes = list_job_genomes(supa, job_id)
+    if not genomes:
+        raise PipelineError("job has no genomes")
+
+    results: list[GenomeResult] = []
+    for genome in genomes:
+        try:
+            results.append(_process_genome(supa, settings, job, genome))
+        except Exception as exc:
+            update_genome(
+                supa,
+                str(genome["id"]),
+                status="failed",
+                finished_at=_now(),
+                error=str(exc)[:2000],
+            )
+            raise
+
+    aggregate = _aggregate_results(supa, settings, job_id, results)
+    n_regions = sum(result.n_regions for result in results)
+    n_safe = sum(result.n_safe for result in results)
+    update_job(
+        supa,
+        job_id,
+        n_regions=n_regions,
+        n_safe=n_safe,
+        result_regions_path=aggregate["result_regions_path"],
+        result_zip_path=aggregate["result_zip_path"],
+        log_tail=f"完成：{n_regions} 个候选区域，{n_safe} 个安全通过",
+    )
     return {
-        "result_csv_path": csv_key,
-        "result_bed_path": bed_key,
-        "result_fai_path": fai_key,
-        "result_fasta_path": fasta_key,
-        "result_gbk_path": gbk_key if (gbk_path and gbk_path.exists()) else None,
-        "result_wig_path": wig_key if (wig_path and wig_path.exists()) else None,
+        "n_genomes": len(results),
         "n_regions": n_regions,
+        "n_safe": n_safe,
+        **aggregate,
     }

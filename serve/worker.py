@@ -34,22 +34,22 @@ class Heartbeater(threading.Thread):
         self.supa = supa
         self.job_id = job_id
         self.interval_sec = interval_sec
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
 
     def run(self) -> None:
-        while not self._stop.wait(self.interval_sec):
+        while not self._stop_event.wait(self.interval_sec):
             try:
                 heartbeat(self.supa, self.job_id)
             except Exception as e:  # network blip; keep going
                 log.warning("heartbeat failed: %s", e)
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
 
 def _process_one_job(supa, settings, job: dict) -> None:
     job_id = job["id"]
-    log.info("claimed job %s sha=%s threshold=%s", job_id, job["fasta_sha256"][:8], job["threshold"])
+    log.info("claimed job %s genomes=%s threshold=%s", job_id, job.get("n_genomes"), job.get("threshold"))
     hb = Heartbeater(supa, job_id, settings.heartbeat_sec)
     hb.start()
     try:
@@ -58,20 +58,16 @@ def _process_one_job(supa, settings, job: dict) -> None:
             "status": "done",
             "finished_at": "now()",
             "error": None,
-            "log_tail": f"done; {result['n_regions']} regions",
-            "result_csv_path": result["result_csv_path"],
-            "result_bed_path": result["result_bed_path"],
-            "result_fai_path": result["result_fai_path"],
-            "result_fasta_path": result["result_fasta_path"],
+            "n_regions": result["n_regions"],
+            "n_safe": result["n_safe"],
+            "log_tail": f"完成：{result['n_regions']} 个候选区域，{result['n_safe']} 个安全通过",
+            "result_regions_path": result["result_regions_path"],
+            "result_zip_path": result["result_zip_path"],
         }
-        if result.get("result_gbk_path"):
-            update_fields["result_gbk_path"] = result["result_gbk_path"]
-        if result.get("result_wig_path"):
-            update_fields["result_wig_path"] = result["result_wig_path"]
         update_job(supa, job_id, **update_fields)
-        log.info("job %s done (%d regions)", job_id, result["n_regions"])
+        log.info("job %s done (%d regions, %d safe pass)", job_id, result["n_regions"], result["n_safe"])
     except GpuBusyTimeout as e:
-        update_job(supa, job_id, status="failed", finished_at="now()", error=f"gpu busy timeout: {e}")
+        update_job(supa, job_id, status="failed", finished_at="now()", error=f"GPU 等待超时：{e}")
         log.warning("job %s aborted: %s", job_id, e)
     except PipelineError as e:
         tb = traceback.format_exc()
