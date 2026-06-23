@@ -10,6 +10,7 @@ const config: Config = {
   content: [
     "./app/**/*.{ts,tsx}",
     "./components/**/*.{ts,tsx}",
+    "./features/**/*.{ts,tsx}",
     "./lib/**/*.{ts,tsx}",
   ],
   darkMode: "media",
@@ -53,8 +54,8 @@ const config: Config = {
         // Four-tier radius hierarchy — use these names in components.
         pill:    "9999px",     // badges
         btn:     "0.5rem",     // 8px — buttons, inputs
-        card:    "0.75rem",    // 12px — small cards
-        section: "1rem",       // 16px — large sections / dropzone
+        card:    "0.5rem",     // 8px — cards and panels
+        section: "0.5rem",     // 8px — large sections / dropzone
       },
       spacing: {
         // Section vertical rhythm: 96px

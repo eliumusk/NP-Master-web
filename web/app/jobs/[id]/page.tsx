@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
 import { createServiceRoleClient, getOptionalUser } from "@/lib/supabase/server";
 import { readServerClientId } from "@/lib/server-client-id";
-import { JobView } from "@/components/JobView";
 import { getSignedJobArtifacts } from "@/lib/job-artifacts";
+import { JobWorkspace } from "@/features/jobs/components/JobWorkspace";
+import { trimRegionPayload } from "@/features/jobs/region-payload";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ export default async function JobPage({
 
   const { data: regions } = await admin
     .from("regions")
-    .select("id,genome_name,contig,start_bp,end_bp,ext_start_bp,ext_end_bp,score,bgc_type,type_score,safe_tier,safe_pass,safe_type_label,mibig_hits")
+    .select("id,genome_name,contig,start_bp,end_bp,ext_start_bp,ext_end_bp,score,bgc_type,type_score,type_scores,safe_tier,safe_pass,safe_type_label,mibig_hits,cds_features")
     .eq("job_id", id)
     .order("score", { ascending: false })
     .limit(1000);
@@ -45,10 +46,10 @@ export default async function JobPage({
   const { user_id, client_id, ...safeJob } = job;
   void user_id; void client_id;
   return (
-    <JobView
+    <JobWorkspace
       initialJob={safeJob}
       initialGenomes={genomes ?? []}
-      initialRegions={regions ?? []}
+      initialRegions={trimRegionPayload(regions)}
       initialArtifacts={artifacts}
       clientIdOverride={query.client_id}
     />

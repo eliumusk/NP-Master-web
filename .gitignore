@@ -26,3 +26,4 @@ cache/
 data/
 serve/.env
 .venv-serve/
+supabase/.temp/
