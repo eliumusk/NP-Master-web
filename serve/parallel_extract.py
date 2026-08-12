@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
 import shlex
 import shutil
 import subprocess
@@ -244,11 +245,12 @@ def run_parallel_lr(*, fasta_path: Path, metadata_csv: Path, emb_dir: Path,
     Reuses metadata_csv (already produced by walk_fasta_to_metadata).
     Returns the number of windows in the merged output."""
     n_workers = len(hosts) * gpus_per_host
+    gpu_offset = int(os.environ.get("BGCMASTER_GPU_OFFSET", "0"))
     subsets = partition_window_ids(metadata_csv, n_workers, work_dir / "lr_subsets")
     specs: list[WorkerSpec] = []
     for i in range(n_workers):
         host = hosts[i // gpus_per_host]
-        cuda = i % gpus_per_host
+        cuda = gpu_offset + (i % gpus_per_host)
         specs.append(WorkerSpec(
             worker_idx=i, host=host, cuda_device=cuda,
             subset_txt=subsets[i],
@@ -316,11 +318,12 @@ def run_parallel(*, fasta_path: Path, features_dir: Path, stem: str,
 
     # Stage 3: build worker specs (round-robin GPUs across hosts)
     n_workers = len(hosts) * gpus_per_host
+    gpu_offset = int(os.environ.get("BGCMASTER_GPU_OFFSET", "0"))
     subsets = partition_window_ids(metadata_csv, n_workers, work_dir / "subsets")
     specs: list[WorkerSpec] = []
     for i in range(n_workers):
         host = hosts[i // gpus_per_host]
-        cuda = i % gpus_per_host
+        cuda = gpu_offset + (i % gpus_per_host)
         specs.append(WorkerSpec(
             worker_idx=i, host=host, cuda_device=cuda,
             subset_txt=subsets[i],

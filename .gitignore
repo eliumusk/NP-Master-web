@@ -27,3 +27,4 @@ data/
 serve/.env
 .venv-serve/
 supabase/.temp/
+manual_runs/

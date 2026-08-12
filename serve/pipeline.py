@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import logging
 import os
 import shutil
@@ -36,6 +37,26 @@ from .safe import annotate_region
 from .type_head import predict_region_types
 
 log = logging.getLogger(__name__)
+
+RESCUE_COLUMNS = [
+    "proposal_source",
+    "domain_rescue",
+    "model_score",
+    "seed_type",
+    "seed_rule",
+    "seed_strength",
+    "seed_core_start",
+    "seed_core_end",
+    "seed_genes",
+    "seed_fragment_groups",
+    "seed_domains",
+    "core_enzyme_id",
+    "core_enzyme_status",
+    "core_enzyme_component_cds",
+    "core_fragment_count",
+    "core_reconstruction_rule",
+    "core_reconstruction_note",
+]
 
 
 class PipelineError(RuntimeError):
@@ -275,8 +296,11 @@ def _decode_to_csv(
             "score": round(_score_region(windows, contig, start, end), 4),
             "type": "",
             "bgc_id": f"BGC_{i:04d}",
+            "proposal_source": "model_only",
+            "domain_rescue": False,
+            "model_score": round(_score_region(windows, contig, start, end), 4),
         })
-    _write_csv(out_csv, rows, ["genome", "contig", "start", "end", "score", "type", "bgc_id"])
+    _write_csv(out_csv, rows, ["genome", "contig", "start", "end", "score", "type", "bgc_id", *RESCUE_COLUMNS])
     return rows, windows
 
 
@@ -301,11 +325,13 @@ def _annotate_and_classify(
     *,
     settings: Settings,
     fasta_path: Path,
+    gff3_path: Path | None,
     raw_rows: list[dict[str, Any]],
     raw_csv: Path,
     results_dir: Path,
     safe_tier_min: str,
     extend_flank_bp: int,
+    core_pep_path: Path | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]], Path | None, Path | None]:
     gbk_path: Path | None = None
     mibig_hits: dict[str, list[dict[str, Any]]] = {}
@@ -314,15 +340,26 @@ def _annotate_and_classify(
     if raw_rows:
         gbk_candidate = results_dir / "regions.gbk"
         try:
-            from .genbank import generate_genbank
+            if gff3_path and gff3_path.exists():
+                from .gff3 import generate_genbank_from_gff3
 
-            generate_genbank(
-                fasta_path=fasta_path,
-                regions_csv=raw_csv,
-                out_gbk_path=gbk_candidate,
-                prodigal_bin=settings.prodigal_bin,
-                work_dir=results_dir / "_genbank_work",
-            )
+                generate_genbank_from_gff3(
+                    fasta_path=fasta_path,
+                    gff3_path=gff3_path,
+                    core_pep_fasta=core_pep_path,
+                    regions_csv=raw_csv,
+                    out_gbk_path=gbk_candidate,
+                )
+            else:
+                from .genbank import generate_genbank
+
+                generate_genbank(
+                    fasta_path=fasta_path,
+                    regions_csv=raw_csv,
+                    out_gbk_path=gbk_candidate,
+                    prodigal_bin=settings.prodigal_bin,
+                    work_dir=results_dir / "_genbank_work",
+                )
             gbk_path = gbk_candidate if gbk_candidate.exists() else None
         except Exception as exc:
             log.warning("genbank generation failed; type/safe evidence will be weaker: %s", exc)
@@ -378,6 +415,22 @@ def _annotate_and_classify(
         prediction = typed.get(bgc_id) or {}
         scores = prediction.get("scores") or {}
         row = dict(row)
+        rescue_type = str(row.get("seed_type") or "")
+        if bool(row.get("domain_rescue")) and rescue_type in {"Alkaloid", "Terpene", "NRP", "Polyketide", "RiPP", "Saccharide"}:
+            # Domain-rescued proposals use the seed class as the primary type;
+            # the RF head still contributes scores when it has matching Pfams.
+            top_type = prediction.get("type") or "Other"
+            top_score = float(prediction.get("score") or 0.0)
+            if row.get("proposal_source") == "domain_rescued" or top_type == "Other" or top_score < 0.5:
+                scores = {rescue_type: 1.0}
+                prediction = {
+                    "type": rescue_type,
+                    "score": 1.0,
+                    "top2_type": "",
+                    "scores": scores,
+                    "scores_text": ";".join(f"{k}={v:.3f}" for k, v in scores.items()),
+                }
+                scores = prediction["scores"]
         row.update({
             "v4_1_type": prediction.get("type") or "Other",
             "v4_1_type_score": round(float(prediction.get("score") or 0.0), 6),
@@ -395,14 +448,27 @@ def _annotate_and_classify(
         row.update(safe)
         out_rows.append(row)
 
-    write_extended_outputs(
-        fasta_path=fasta_path,
-        rows=out_rows,
-        out_dir=results_dir / "extended",
-        genome_name=str(raw_rows[0]["genome"]) if raw_rows else "genome",
-        prodigal_bin=settings.prodigal_bin,
-        flank_bp=extend_flank_bp,
-    )
+    if gff3_path and gff3_path.exists():
+        from .gff3 import write_extended_outputs_from_gff3
+
+        write_extended_outputs_from_gff3(
+            fasta_path=fasta_path,
+            gff3_path=gff3_path,
+            core_pep_fasta=core_pep_path,
+            rows=out_rows,
+            out_dir=results_dir / "extended",
+            genome_name=str(raw_rows[0]["genome"]) if raw_rows else "genome",
+            flank_bp=extend_flank_bp,
+        )
+    else:
+        write_extended_outputs(
+            fasta_path=fasta_path,
+            rows=out_rows,
+            out_dir=results_dir / "extended",
+            genome_name=str(raw_rows[0]["genome"]) if raw_rows else "genome",
+            prodigal_bin=settings.prodigal_bin,
+            flank_bp=extend_flank_bp,
+        )
     return out_rows, cds_by_region, mibig_hits, gbk_path, pfam_tbl
 
 
@@ -522,6 +588,60 @@ def _prepare_fasta(supa: Any, settings: Settings, genome: dict[str, Any]) -> Pat
     return fasta_path
 
 
+def _prepare_gff3(supa: Any, settings: Settings, genome: dict[str, Any]) -> Path | None:
+    """Download an optional genome annotation file when the job schema provides one."""
+    storage_path = (
+        genome.get("gff3_path")
+        or genome.get("gff_path")
+        or genome.get("annotation_path")
+        or genome.get("gff3_storage_path")
+    )
+    local_path = genome.get("gff3_local_path") or genome.get("gff_local_path")
+    if local_path and Path(str(local_path)).exists():
+        return Path(str(local_path))
+    if not storage_path:
+        return None
+
+    sha = str(genome.get("gff3_sha256") or genome.get("gff_sha256") or hashlib.sha256(str(storage_path).encode()).hexdigest())
+    suffix = ".gff3" if str(storage_path).lower().endswith(".gff3") else ".gff"
+    gff3_path = settings.npmaster_cache_dir / "inputs" / f"{sha}{suffix}"
+    gff3_path.parent.mkdir(parents=True, exist_ok=True)
+    if not gff3_path.exists():
+        bucket = str(genome.get("gff3_bucket") or genome.get("annotation_bucket") or settings.fasta_bucket)
+        download_object(supa, bucket, str(storage_path), gff3_path)
+    return gff3_path
+
+
+def _prepare_core_pep(supa: Any, settings: Settings, genome: dict[str, Any]) -> Path | None:
+    """Download an optional corrected peptide FASTA for core-enzyme reconstruction."""
+    storage_path = (
+        genome.get("pep_path")
+        or genome.get("pep_fasta_path")
+        or genome.get("protein_path")
+        or genome.get("protein_fasta_path")
+        or genome.get("core_pep_path")
+        or genome.get("core_pep_fasta_path")
+    )
+    local_path = genome.get("pep_local_path") or genome.get("protein_local_path")
+    if local_path and Path(str(local_path)).exists():
+        return Path(str(local_path))
+    if not storage_path:
+        return None
+
+    sha = str(
+        genome.get("pep_sha256")
+        or genome.get("protein_sha256")
+        or hashlib.sha256(str(storage_path).encode()).hexdigest()
+    )
+    suffix = ".fa" if str(storage_path).lower().endswith((".fa", ".faa", ".fasta")) else ".pep.fa"
+    pep_path = settings.npmaster_cache_dir / "inputs" / f"{sha}{suffix}"
+    pep_path.parent.mkdir(parents=True, exist_ok=True)
+    if not pep_path.exists():
+        bucket = str(genome.get("pep_bucket") or genome.get("protein_bucket") or settings.fasta_bucket)
+        download_object(supa, bucket, str(storage_path), pep_path)
+    return pep_path
+
+
 def _process_genome(supa: Any, settings: Settings, job: dict[str, Any], genome: dict[str, Any]) -> GenomeResult:
     job_id = str(job["id"])
     genome_name = str(genome["genome_name"])
@@ -532,6 +652,12 @@ def _process_genome(supa: Any, settings: Settings, job: dict[str, Any], genome: 
     update_genome(supa, genome_id, status="running", started_at=_now(), error=None)
     update_job(supa, job_id, log_tail=f"{genome_name}: 下载 FASTA")
     fasta_path = _prepare_fasta(supa, settings, genome)
+    gff3_path = _prepare_gff3(supa, settings, genome)
+    core_pep_path = _prepare_core_pep(supa, settings, genome)
+    if gff3_path:
+        update_job(supa, job_id, log_tail=f"{genome_name}: 使用 GFF3 注释和 domain rescue")
+    if core_pep_path:
+        update_job(supa, job_id, log_tail=f"{genome_name}: 使用 peptide evidence 进行核心酶容错重建")
 
     probs_dir = settings.npmaster_cache_dir / "probs" / job_id / genome_name
     used_precomputed_probs = (
@@ -589,11 +715,34 @@ def _process_genome(supa: Any, settings: Settings, job: dict[str, Any], genome: 
         min_support_windows=int(job.get("min_support_windows") or settings.default_min_support_windows),
         min_len_bp=int(job.get("min_len_bp") or settings.default_min_len_bp),
     )
+    if gff3_path and gff3_path.exists() and settings.pfam_db_path.exists():
+        try:
+            from .domain_rescue import merge_model_and_domain_rows, propose_domain_rescued_regions
+
+            update_job(supa, job_id, log_tail=f"{genome_name}: 运行 GFF3/Pfam domain rescue")
+            domain_rows = propose_domain_rescued_regions(
+                fasta_path=fasta_path,
+                gff3_path=gff3_path,
+                pfam_db=settings.pfam_db_path,
+                hmmer_bin=settings.hmmer_bin,
+                work_dir=results_dir / "_domain_rescue_work",
+                genome_name=genome_name,
+                threads=settings.hmmer_threads,
+            )
+            for row in domain_rows:
+                model_score = round(_score_region(_windows, str(row["contig"]), int(row["start"]), int(row["end"])), 4)
+                row["model_score"] = model_score
+            raw_rows = merge_model_and_domain_rows(raw_rows, domain_rows)
+            _write_csv(raw_csv, raw_rows, ["genome", "contig", "start", "end", "score", "type", "bgc_id", *RESCUE_COLUMNS])
+        except Exception as exc:
+            log.warning("domain rescue failed; continuing with model-only regions: %s", exc)
 
     update_job(supa, job_id, log_tail=f"{genome_name}: 注释 Pfam / MIBiG / 类型 / 安全等级")
     rows, cds_by_region, mibig_hits, gbk_path, pfam_tbl = _annotate_and_classify(
         settings=settings,
         fasta_path=fasta_path,
+        gff3_path=gff3_path,
+        core_pep_path=core_pep_path,
         raw_rows=raw_rows,
         raw_csv=raw_csv,
         results_dir=results_dir,
@@ -604,6 +753,7 @@ def _process_genome(supa: Any, settings: Settings, job: dict[str, Any], genome: 
     regions_csv = results_dir / "regions.csv"
     _write_csv(regions_csv, rows, [
         "genome", "contig", "start", "end", "score", "type", "bgc_id",
+        *RESCUE_COLUMNS,
         "v4_1_type", "v4_1_type_score", "v4_1_type_top2", "v4_1_type_scores",
         "safe_type_label", "evidence_tier", "safe_pass", "ext_start", "ext_end",
     ])
@@ -648,7 +798,14 @@ def _process_genome(supa: Any, settings: Settings, job: dict[str, Any], genome: 
         ("extended_cds_faa", results_dir / "extended" / "extended_cds.faa", "text/plain"),
         ("extended_cds_fna", results_dir / "extended" / "extended_cds.fna", "text/plain"),
         ("extended_cds_csv", results_dir / "extended" / "extended_cds.csv", "text/csv"),
+        ("reconstructed_core_enzymes_faa", results_dir / "extended" / "reconstructed_core_enzymes.faa", "text/plain"),
+        ("reconstructed_core_enzymes_fna", results_dir / "extended" / "reconstructed_core_enzymes.fna", "text/plain"),
+        ("reconstructed_core_enzymes_csv", results_dir / "extended" / "reconstructed_core_enzymes.csv", "text/csv"),
     ]
+    if gff3_path and gff3_path.exists():
+        artifact_specs.append(("input_gff3", gff3_path, "text/plain"))
+    if core_pep_path and core_pep_path.exists():
+        artifact_specs.append(("input_core_pep", core_pep_path, "text/plain"))
     if gbk_path and gbk_path.exists():
         artifact_specs.append(("regions_gbk", gbk_path, "text/plain"))
     if wig_path and wig_path.exists():

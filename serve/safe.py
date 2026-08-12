@@ -193,7 +193,12 @@ def mechanism_label(model_type: str, ev: dict[str, Any], type_confidence: str) -
 
 
 def evidence_tier(length_bp: int, at_edge: bool, ev: dict[str, Any], label: str, type_confidence: str) -> str:
-    has_bio = ev["n_core_signals"] >= 2 or ev["n_tailoring_cds"] >= 2 or ev["max_mibig_identity"] >= 0.35
+    has_bio = (
+        ev["n_core_signals"] >= 2
+        or label.endswith("_supported")
+        or ev["n_tailoring_cds"] >= 2
+        or ev["max_mibig_identity"] >= 0.35
+    )
     has_strong = ev["n_core_signals"] >= 3 or label.endswith("_supported") or ev["max_mibig_identity"] >= 0.70
     if length_bp < 3000 or ev["n_cds"] <= 2:
         return "Tier4_fragmentary_or_single_gene"
