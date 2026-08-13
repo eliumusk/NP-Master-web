@@ -7,6 +7,11 @@ export const GenomeUpload = z.object({
   genomeName: z.string().min(1).max(160),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   bytes: z.number().int().positive().max(50 * 1024 * 1024),
+  gff3: z.object({
+    filename: z.string().min(1).max(256),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    bytes: z.number().int().positive().max(20 * 1024 * 1024),
+  }).optional(),
 });
 
 export const JobCreate = z.object({

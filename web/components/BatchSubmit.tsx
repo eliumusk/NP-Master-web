@@ -4,13 +4,22 @@ import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getOrCreateClientId } from "@/lib/clientId";
 import { sha256OfBlob, sniffFasta } from "@/lib/fasta";
+import { sniffGff3 } from "@/lib/gff3";
 import { useI18n } from "@/lib/i18n/client";
 
 const ANON_MAX_BYTES = 10 * 1024 * 1024;
 const AUTH_MAX_BYTES = 50 * 1024 * 1024;
 const AUTH_MAX_FILES = 64;
+const GFF3_MAX_BYTES = 20 * 1024 * 1024;
 
 type Phase = "idle" | "hashing" | "creating" | "uploading" | "queueing" | "error";
+
+type Gff3Picked = {
+  file: File;
+  sha256?: string;
+  ok?: boolean;
+  message?: string;
+};
 
 type Picked = {
   file: File;
@@ -19,6 +28,7 @@ type Picked = {
   ok?: boolean;
   message?: string;
   progress?: number;
+  gff3?: Gff3Picked;
 };
 
 type UploadTicket = {
@@ -27,6 +37,7 @@ type UploadTicket = {
   objectKey: string;
   uploadUrl: string | null;
   alreadyUploaded: boolean;
+  gff3UploadUrl?: string | null;
 };
 
 export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boolean; compact?: boolean }) {
@@ -74,6 +85,25 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
     setFiles((xs) => xs.filter((_, idx) => idx !== i));
   }
 
+  async function attachGff3(i: number, file: File) {
+    const item: Gff3Picked = { file };
+    if (file.size > GFF3_MAX_BYTES) {
+      item.ok = false;
+      item.message = t.submit.gff3TooLarge;
+    } else {
+      const sniff = await sniffGff3(file);
+      item.ok = sniff.ok;
+      item.message = sniff.ok
+        ? `${(file.size / 1024 / 1024).toFixed(2)} MB`
+        : t.submit[sniff.reasonKey === "empty" ? "gff3Empty" : "gff3Invalid"];
+    }
+    setFiles((xs) => xs.map((x, idx) => (idx === i ? { ...x, gff3: item } : x)));
+  }
+
+  function removeGff3(i: number) {
+    setFiles((xs) => xs.map((x, idx) => (idx === i ? { ...x, gff3: undefined } : x)));
+  }
+
   async function submit() {
     setError("");
     if (validFiles.length === 0) {
@@ -94,6 +124,7 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
       const hashed = await Promise.all(validFiles.map(async (item) => ({
         ...item,
         sha256: await sha256OfBlob(item.file),
+        gff3: item.gff3?.ok ? { ...item.gff3, sha256: await sha256OfBlob(item.gff3.file) } : item.gff3,
       })));
       setFiles(hashed);
 
@@ -117,6 +148,9 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
             genomeName: item.genomeName,
             sha256: item.sha256,
             bytes: item.file.size,
+            gff3: item.gff3?.ok && item.gff3.sha256
+              ? { filename: item.gff3.file.name, sha256: item.gff3.sha256, bytes: item.gff3.file.size }
+              : undefined,
           })),
         }),
       });
@@ -126,14 +160,18 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
       const tickets = created.uploads as UploadTicket[];
       setPhase("uploading");
       for (const ticket of tickets) {
-        if (!ticket.uploadUrl) continue;
         const item = hashed.find((f) => f.genomeName === ticket.genomeName);
         if (!item) continue;
-        await uploadWithProgress(ticket.uploadUrl, item.file, (progress) => {
-          setFiles((current) => current.map((f) =>
-            f.genomeName === ticket.genomeName ? { ...f, progress } : f,
-          ));
-        });
+        if (ticket.uploadUrl) {
+          await uploadWithProgress(ticket.uploadUrl, item.file, (progress) => {
+            setFiles((current) => current.map((f) =>
+              f.genomeName === ticket.genomeName ? { ...f, progress } : f,
+            ));
+          });
+        }
+        if (ticket.gff3UploadUrl && item.gff3?.ok) {
+          await uploadWithProgress(ticket.gff3UploadUrl, item.gff3.file, () => {});
+        }
       }
 
       setPhase("queueing");
@@ -206,6 +244,37 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
                     />
                     <div className={`mt-1.5 text-xs ${item.ok === false ? "text-rose-300" : "text-fg-muted"}`}>
                       {item.file.name} · {item.message ?? t.submit.waitingCheck}
+                    </div>
+                    <div className="mt-1.5">
+                      {item.gff3 ? (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className={item.gff3.ok === false ? "text-rose-300" : "text-fg-muted"}>
+                            GFF3: {item.gff3.file.name} · {item.gff3.message}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeGff3(i)}
+                            className="rounded px-1 text-fg-subtle transition hover:text-fg"
+                            aria-label="remove gff3"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="inline-flex cursor-pointer items-center gap-1 text-xs text-fg-subtle transition hover:text-brand">
+                          <input
+                            type="file"
+                            accept=".gff,.gff3,text/plain"
+                            className="sr-only"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) void attachGff3(i, f);
+                              e.target.value = "";
+                            }}
+                          />
+                          {t.submit.attachGff3}
+                        </label>
+                      )}
                     </div>
                   </div>
                   <button type="button" onClick={() => removeAt(i)} className="rounded-btn px-2 py-1 text-xs text-fg-subtle transition hover:bg-elevated hover:text-fg">

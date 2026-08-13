@@ -81,6 +81,27 @@ export async function POST(request: NextRequest) {
       uploadUrl = signed.signedUrl;
     }
 
+    // Optional GFF3 annotation attachment (activates the rescue/enhancement path)
+    let gff3Path: string | null = null;
+    let gff3UploadUrl: string | null = null;
+    if (genome.gff3) {
+      const gff3Ext = genome.gff3.filename.toLowerCase().endsWith(".gff") ? ".gff" : ".gff3";
+      gff3Path = `${ownerKey}/${job.id}/${genome.gff3.sha256}${gff3Ext}`;
+      const { data: gff3Existing } = await admin.storage
+        .from(bucket)
+        .list(`${ownerKey}/${job.id}`, { search: `${genome.gff3.sha256}${gff3Ext}`, limit: 1 });
+      const gff3Already = !!gff3Existing?.some((o) => o.name === `${genome.gff3!.sha256}${gff3Ext}`);
+      if (!gff3Already) {
+        const { data: signed, error: signErr } = await admin.storage
+          .from(bucket)
+          .createSignedUploadUrl(gff3Path);
+        if (signErr || !signed) {
+          return NextResponse.json({ error: `生成 GFF3 上传地址失败：${signErr?.message ?? "unknown"}` }, { status: 500 });
+        }
+        gff3UploadUrl = signed.signedUrl;
+      }
+    }
+
     const { data: row, error: genomeErr } = await admin
       .from("genomes")
       .insert({
@@ -90,6 +111,7 @@ export async function POST(request: NextRequest) {
         fasta_path: objectKey,
         fasta_sha256: genome.sha256,
         fasta_bytes: genome.bytes,
+        gff3_path: gff3Path,
         status: alreadyUploaded ? "queued" : "awaiting_upload",
       })
       .select("id,genome_name")
@@ -104,6 +126,7 @@ export async function POST(request: NextRequest) {
       objectKey,
       uploadUrl,
       alreadyUploaded,
+      gff3UploadUrl,
     });
   }
 
