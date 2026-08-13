@@ -26,10 +26,15 @@ const notoSC = Noto_Sans_SC({
   preload: false, // CJK uses unicode-range slices; nothing meaningful to preload
 });
 
-export const metadata: Metadata = {
-  title: "BGCMaster",
-  description: "面向细菌基因组的 BGC 区域检测、类型分类、安全分级和注释工作流。",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getServerLocale();
+  return {
+    title: "BGCMaster",
+    description: locale === "en"
+      ? "BGC region detection, type classification, safety tiering and annotation for bacterial genomes."
+      : "面向细菌基因组的 BGC 区域检测、类型分类、安全分级和注释工作流。",
+  };
+}
 
 export const viewport: Viewport = {
   themeColor: [{ media: "(prefers-color-scheme: dark)", color: "#04070d" }],
