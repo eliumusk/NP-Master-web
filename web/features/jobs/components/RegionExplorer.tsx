@@ -1,42 +1,51 @@
 "use client";
 
+import Link from "next/link";
 import { useI18n } from "@/lib/i18n/client";
-import { ALL_FILTER, bgcTypeMeta, tierClassName, tierLabel } from "../constants";
+import { ALL_FILTER, bgcTypeMeta } from "../constants";
 import { formatBp, formatRange, formatScore } from "../format";
-import { countDomains, extendedLength, regionLength } from "../stats";
+import { evidenceKey, extendedLength, seedGeneOf } from "../stats";
 import type { Region, RegionFilters } from "../types";
+
+const EVIDENCE_CHIP: Record<string, string> = {
+  tier1: "bg-emerald-400/10 text-emerald-300 ring-1 ring-inset ring-emerald-400/30",
+  tier2: "bg-sky-400/10 text-sky-300 ring-1 ring-inset ring-sky-400/30",
+  tier3: "bg-amber-400/10 text-amber-300 ring-1 ring-inset ring-amber-400/30",
+  tier4: "bg-white/[0.05] text-fg-muted ring-1 ring-inset ring-white/[0.08]",
+  tier5: "bg-rose-400/10 text-rose-300 ring-1 ring-inset ring-rose-400/30",
+  none: "bg-white/[0.05] text-fg-muted ring-1 ring-inset ring-white/[0.08]",
+};
 
 export function RegionExplorer({
   regions,
   allRegions,
   filters,
-  selectedRegionId,
+  bgcIds,
+  detailHref,
   onFiltersChange,
-  onSelectRegion,
 }: {
   regions: Region[];
   allRegions: Region[];
   filters: RegionFilters;
-  selectedRegionId: number | null;
+  bgcIds: Map<number, string>;
+  detailHref: (regionId: number) => string;
   onFiltersChange: (filters: RegionFilters) => void;
-  onSelectRegion: (regionId: number) => void;
 }) {
   const { t, locale } = useI18n();
-  const genomes = uniqueSorted(allRegions.map((region) => region.genome_name));
-  const types = uniqueSorted(allRegions.map((region) => region.bgc_type || "Other"));
-  const tiers = uniqueSorted(allRegions.map((region) => region.safe_tier || ""));
+  const contigs = uniqueSorted(allRegions.map((r) => `${r.genome_name}|${r.contig}`));
+  const multiGenome = new Set(allRegions.map((r) => r.genome_name)).size > 1;
+  const types = uniqueSorted(allRegions.map((r) => r.bgc_type || "Other"));
+  const evidenceKeys = uniqueSortedKeys(allRegions);
 
   return (
     <section className="panel min-w-0 overflow-hidden">
+      {/* ── filter bar ─────────────────────────────────────── */}
       <div className="border-b border-white/[0.06] p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-[15px] font-semibold">{t.explorer.title}</h2>
-            <p className="mt-0.5 text-xs text-fg-muted">
-              {t.explorer.showing} <span className="numeric-display text-brand">{regions.length}</span>
-              <span className="text-fg-subtle"> {t.explorer.of} {allRegions.length}</span> {t.explorer.regionsUnit}
-            </p>
-          </div>
+          <p className="text-xs text-fg-muted">
+            {t.explorer.showing} <span className="numeric-display text-brand">{regions.length}</span>
+            <span className="text-fg-subtle"> {t.explorer.of} {allRegions.length}</span> {t.explorer.regionsUnit}
+          </p>
           <label className="flex cursor-pointer items-center gap-2 rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-xs transition hover:border-white/20">
             <input
               type="checkbox"
@@ -48,13 +57,7 @@ export function RegionExplorer({
           </label>
         </div>
 
-        <div className="mt-3 grid gap-2 md:grid-cols-[1fr,1fr,1fr,1.4fr]">
-          <FilterSelect
-            allLabel={t.explorer.allGenomes}
-            value={filters.genome}
-            onChange={(value) => onFiltersChange({ ...filters, genome: value })}
-            options={genomes.map((value) => ({ value, label: value }))}
-          />
+        <div className="mt-3 grid gap-2 md:grid-cols-[1fr,1fr,1fr,1.6fr]">
           <FilterSelect
             allLabel={t.explorer.allTypes}
             value={filters.bgcType}
@@ -65,7 +68,16 @@ export function RegionExplorer({
             allLabel={t.explorer.allTiers}
             value={filters.tier}
             onChange={(value) => onFiltersChange({ ...filters, tier: value })}
-            options={tiers.map((value) => ({ value, label: tierLabel(value, locale) }))}
+            options={evidenceKeys.map((key) => ({ value: key, label: t.evidence[key as keyof typeof t.evidence] ?? key }))}
+          />
+          <FilterSelect
+            allLabel={multiGenome ? t.explorer.allGenomes : t.explorer.allContigs}
+            value={filters.contig}
+            onChange={(value) => onFiltersChange({ ...filters, contig: value })}
+            options={contigs.map((value) => ({
+              value,
+              label: multiGenome ? value.replace("|", " · ") : value.split("|")[1],
+            }))}
           />
           <input
             value={filters.query}
@@ -76,20 +88,24 @@ export function RegionExplorer({
         </div>
       </div>
 
+      {/* ── main table ─────────────────────────────────────── */}
       <div className="max-h-[46rem] overflow-auto">
         {regions.length === 0 ? (
           <div className="p-10 text-center text-sm text-fg-muted">{t.explorer.empty}</div>
         ) : (
-          <table className="w-full min-w-[58rem] text-[13px]">
+          <table className="w-full min-w-[62rem] text-[13px]">
             <thead className="sticky top-0 z-10 bg-surface/95 backdrop-blur-sm">
               <tr className="border-b border-white/[0.06] text-left text-[11px] uppercase tracking-wider text-fg-subtle">
-                <th className="px-4 py-2.5 font-medium">{t.explorer.colRegion}</th>
-                <th className="px-3 py-2.5 font-medium">{t.explorer.colLength}</th>
-                <th className="px-3 py-2.5 text-right font-medium">{t.explorer.colScore}</th>
+                <th className="px-4 py-2.5 font-medium">{t.explorer.colBgc}</th>
+                <th className="px-3 py-2.5 font-medium">{t.explorer.colContig}</th>
+                <th className="px-3 py-2.5 font-medium">{t.explorer.colSpan}</th>
+                <th className="px-3 py-2.5 text-right font-medium">{t.explorer.colLen}</th>
                 <th className="px-3 py-2.5 font-medium">{t.explorer.colType}</th>
-                <th className="px-3 py-2.5 font-medium">{t.explorer.colTier}</th>
-                <th className="px-3 py-2.5 font-medium">{t.explorer.colCds}</th>
-                <th className="px-4 py-2.5 font-medium">{t.explorer.colMibig}</th>
+                <th className="px-3 py-2.5 text-right font-medium">{t.explorer.colScore}</th>
+                <th className="px-3 py-2.5 font-medium">{t.explorer.colEvidence}</th>
+                <th className="px-3 py-2.5 font-medium">{t.explorer.colSeed}</th>
+                <th className="px-3 py-2.5 font-medium">{t.explorer.colMibig}</th>
+                <th className="px-4 py-2.5 font-medium">{t.explorer.colAction}</th>
               </tr>
             </thead>
             <tbody>
@@ -97,9 +113,13 @@ export function RegionExplorer({
                 <RegionRow
                   key={region.id}
                   region={region}
+                  bgcId={bgcIds.get(region.id) ?? `R${region.id}`}
+                  evidenceLabel={t.evidence[evidenceKey(region)]}
+                  detailUrl={detailHref(region.id)}
+                  noHitLabel={t.explorer.noHit}
+                  unknownProduct={t.explorer.unknownProduct}
+                  viewDetail={t.explorer.viewDetail}
                   locale={locale}
-                  selected={region.id === selectedRegionId}
-                  onSelect={() => onSelectRegion(region.id)}
                 />
               ))}
             </tbody>
@@ -112,76 +132,80 @@ export function RegionExplorer({
 
 function RegionRow({
   region,
-  locale,
-  selected,
-  onSelect,
+  bgcId,
+  evidenceLabel,
+  detailUrl,
+  noHitLabel,
+  unknownProduct,
+  viewDetail,
 }: {
   region: Region;
-  locale: "zh" | "en";
-  selected: boolean;
-  onSelect: () => void;
+  bgcId: string;
+  evidenceLabel: string;
+  detailUrl: string;
+  noHitLabel: string;
+  unknownProduct: string;
+  viewDetail: string;
+  locale: string;
 }) {
-  const { t } = useI18n();
   const topHit = region.mibig_hits?.[0];
   const typeMeta = bgcTypeMeta(region.bgc_type);
-  const scorePct = Math.round(Math.min(1, Math.max(0, region.score)) * 100);
+  const seed = seedGeneOf(region);
+  const extLen = extendedLength(region);
+  const spanStart = region.ext_start_bp ?? region.start_bp;
+  const spanEnd = region.ext_end_bp ?? region.end_bp;
 
   return (
-    <tr
-      className={`cursor-pointer border-b border-white/[0.04] transition ${
-        selected
-          ? "bg-brand/[0.07] shadow-[inset_2px_0_0_rgb(var(--brand))]"
-          : "hover:bg-white/[0.03]"
-      }`}
-      onClick={onSelect}
-    >
-      <td className="max-w-[18rem] px-4 py-3">
-        <div className="min-w-0">
-          <div className="truncate font-mono text-xs font-medium text-fg">{region.genome_name}</div>
-          <div className="mt-0.5 truncate font-mono text-[11px] text-fg-muted">{region.contig}</div>
-          <div className="numeric-display mt-0.5 text-[11px] text-fg-subtle">{formatRange(region.start_bp, region.end_bp)}</div>
-        </div>
+    <tr className="group border-b border-white/[0.04] transition last:border-0 hover:bg-white/[0.03]">
+      <td className="px-4 py-3">
+        <Link href={detailUrl} className="font-mono text-xs font-semibold text-brand hover:underline">
+          {bgcId}
+        </Link>
       </td>
-      <td className="px-3 py-3">
-        <div className="numeric-display text-xs">{formatBp(regionLength(region))}</div>
-        <div className="numeric-display mt-0.5 text-[11px] text-fg-subtle">
-          {t.explorer.ext} {extendedLength(region) == null ? "-" : formatBp(extendedLength(region))}
-        </div>
+      <td className="max-w-[10rem] px-3 py-3">
+        <div className="truncate font-mono text-xs text-fg" title={region.contig}>{region.contig}</div>
       </td>
-      <td className="px-3 py-3">
-        <div className="flex items-center justify-end gap-2">
-          <div className="hidden h-1 w-14 overflow-hidden rounded-pill bg-white/[0.06] md:block">
-            <div className="h-full rounded-pill bg-gradient-to-r from-brand/60 to-brand" style={{ width: `${scorePct}%` }} />
-          </div>
-          <span className="numeric-display text-xs text-fg">{formatScore(region.score)}</span>
-        </div>
+      <td className="numeric-display px-3 py-3 text-xs text-fg-muted">
+        {formatRange(spanStart, spanEnd)}
+      </td>
+      <td className="numeric-display px-3 py-3 text-right text-xs">
+        {extLen != null ? formatBp(extLen) : formatBp(Math.max(0, region.end_bp - region.start_bp))}
       </td>
       <td className="px-3 py-3">
         <span className={`inline-flex max-w-32 items-center rounded-pill px-2 py-0.5 text-[11px] font-medium ${typeMeta.className}`}>
           <span className="truncate">{typeMeta.label}</span>
         </span>
-        <div className="numeric-display mt-0.5 text-[11px] text-fg-subtle">{formatScore(region.type_score)}</div>
       </td>
+      <td className="numeric-display px-3 py-3 text-right text-xs text-fg">{formatScore(region.score)}</td>
       <td className="px-3 py-3">
-        <span className={`inline-flex max-w-44 items-center rounded-pill px-2 py-0.5 text-[11px] font-medium ${tierClassName(region.safe_tier, region.safe_pass)}`}>
-          <span className="truncate">{tierLabel(region.safe_tier, locale)}</span>
+        <span className={`inline-flex items-center rounded-pill px-2 py-0.5 text-[11px] font-medium ${EVIDENCE_CHIP[evidenceKey(region)]}`}>
+          {evidenceLabel}
         </span>
-        <div className="mt-0.5 text-[11px] text-fg-subtle">{region.safe_pass ? t.explorer.pass : t.explorer.fail}</div>
       </td>
-      <td className="numeric-display px-3 py-3 text-xs text-fg-muted">
-        {(region.cds_features?.length ?? 0).toLocaleString()} / {countDomains(region.cds_features).toLocaleString()}
-      </td>
-      <td className="max-w-[13rem] px-4 py-3 text-xs">
-        {topHit?.bgc_id ? (
-          <>
-            <div className="truncate font-mono text-fg">{topHit.bgc_id}</div>
-            <div className="mt-0.5 truncate text-fg-subtle">
-              {topHit.product || t.explorer.unknownProduct} {topHit.identity != null ? `· ${Math.round(topHit.identity * 100)}%` : ""}
-            </div>
-          </>
+      <td className="max-w-[12rem] px-3 py-3">
+        {seed ? (
+          <span className="block truncate text-xs text-fg" title={seed.name}>
+            {seed.name}
+            {seed.extra > 0 && <span className="text-fg-subtle"> +{seed.extra}</span>}
+          </span>
         ) : (
-          <span className="text-fg-subtle">{t.explorer.noHit}</span>
+          <span className="text-fg-subtle">—</span>
         )}
+      </td>
+      <td className="max-w-[11rem] px-3 py-3 text-xs">
+        {topHit?.bgc_id ? (
+          <span className="block truncate font-mono text-fg" title={topHit.product || unknownProduct}>
+            {topHit.bgc_id}
+            {topHit.identity != null && <span className="text-fg-subtle"> · {Math.round(topHit.identity * 100)}%</span>}
+          </span>
+        ) : (
+          <span className="text-fg-subtle">{noHitLabel}</span>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        <Link href={detailUrl} className="text-xs font-medium text-brand hover:underline">
+          {viewDetail}
+        </Link>
       </td>
     </tr>
   );
@@ -216,4 +240,10 @@ function FilterSelect({
 
 function uniqueSorted(values: string[]) {
   return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
+
+function uniqueSortedKeys(regions: Region[]) {
+  const order = ["tier1", "tier2", "tier3", "tier4", "tier5", "none"];
+  const present = new Set(regions.map((r) => evidenceKey(r)));
+  return order.filter((key) => present.has(key as never));
 }

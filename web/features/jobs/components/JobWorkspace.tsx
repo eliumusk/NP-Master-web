@@ -2,14 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n/client";
-import type { JobWorkspacePayload, Region, RegionFilters } from "../types";
+import type { JobWorkspacePayload, RegionFilters } from "../types";
 import { ALL_FILTER } from "../constants";
-import { filterRegions } from "../stats";
+import { assignBgcIds, filterRegions, sortRegionsForTable } from "../stats";
 import { ArtifactDownloads } from "./ArtifactDownloads";
 import { FeedbackBox } from "./FeedbackBox";
 import { JobHeader } from "./JobHeader";
 import { JobOverview } from "./JobOverview";
-import { RegionDetail } from "./RegionDetail";
 import { RegionExplorer } from "./RegionExplorer";
 
 const TERMINAL = new Set(["done", "failed", "canceled"]);
@@ -27,10 +26,9 @@ export function JobWorkspace({
   const [genomes, setGenomes] = useState(initialGenomes);
   const [regions, setRegions] = useState(initialRegions);
   const [artifacts, setArtifacts] = useState(initialArtifacts);
-  const [selectedRegionId, setSelectedRegionId] = useState<number | null>(initialRegions[0]?.id ?? null);
   const [filters, setFilters] = useState<RegionFilters>({
     safeOnly: true,
-    genome: ALL_FILTER,
+    contig: ALL_FILTER,
     bgcType: ALL_FILTER,
     tier: ALL_FILTER,
     query: "",
@@ -58,36 +56,30 @@ export function JobWorkspace({
     return () => clearInterval(timer);
   }, [clientIdOverride, job.id, job.status]);
 
-  const filteredRegions = useMemo(() => filterRegions(regions, filters), [regions, filters]);
-  const selectedRegion = useMemo(
-    () => pickSelectedRegion(regions, filteredRegions, selectedRegionId),
-    [filteredRegions, regions, selectedRegionId],
+  const bgcIds = useMemo(() => assignBgcIds(regions), [regions]);
+  const tableRegions = useMemo(
+    () => sortRegionsForTable(filterRegions(regions, filters, bgcIds)),
+    [regions, filters, bgcIds],
   );
-
-  useEffect(() => {
-    if (!selectedRegion && filteredRegions[0]) {
-      setSelectedRegionId(filteredRegions[0].id);
-    }
-  }, [filteredRegions, selectedRegion]);
+  const summaryUrl = useMemo(
+    () => artifacts.find((a) => a.kind === "regions_csv" && a.genome_id === null)?.url ?? null,
+    [artifacts],
+  );
+  const detailSuffix = clientIdOverride ? `?client_id=${encodeURIComponent(clientIdOverride)}` : "";
 
   return (
     <div className="animate-fade-in space-y-5">
       <JobHeader job={job} />
-      <JobOverview job={job} genomes={genomes} regions={regions} />
+      <JobOverview job={job} genomes={genomes} regions={regions} summaryUrl={summaryUrl} />
 
-      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_27rem]">
-        <RegionExplorer
-          regions={filteredRegions}
-          allRegions={regions}
-          filters={filters}
-          selectedRegionId={selectedRegion?.id ?? null}
-          onFiltersChange={setFilters}
-          onSelectRegion={setSelectedRegionId}
-        />
-        <div className="xl:sticky xl:top-20 xl:max-h-[calc(100vh-6.5rem)] xl:overflow-y-auto xl:pr-1">
-          <RegionDetail region={selectedRegion} isLoggedIn={isLoggedIn} jobId={job.id} />
-        </div>
-      </div>
+      <RegionExplorer
+        regions={tableRegions}
+        allRegions={regions}
+        filters={filters}
+        bgcIds={bgcIds}
+        detailHref={(regionId) => `/jobs/${job.id}/regions/${regionId}${detailSuffix}`}
+        onFiltersChange={setFilters}
+      />
 
       {job.status === "done" && (
         <section className="panel p-5">
@@ -102,12 +94,4 @@ export function JobWorkspace({
       <ArtifactDownloads artifacts={artifacts} />
     </div>
   );
-}
-
-function pickSelectedRegion(regions: Region[], filtered: Region[], selectedId: number | null) {
-  if (selectedId != null) {
-    const current = filtered.find((region) => region.id === selectedId);
-    if (current) return current;
-  }
-  return filtered[0] ?? regions[0] ?? null;
 }

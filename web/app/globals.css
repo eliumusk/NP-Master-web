@@ -36,15 +36,15 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Ambient page glow — soft brand/violet wash at the top of the viewport */
+/* Ambient page glow — kept very subtle */
 body::before {
   content: "";
   position: fixed;
   inset: 0 0 auto 0;
-  height: 520px;
+  height: 460px;
   background:
-    radial-gradient(640px 320px at 18% -8%, rgb(var(--brand) / 0.08), transparent 70%),
-    radial-gradient(720px 360px at 82% -12%, rgb(var(--accent) / 0.07), transparent 70%);
+    radial-gradient(640px 300px at 18% -10%, rgb(var(--brand) / 0.04), transparent 70%),
+    radial-gradient(720px 340px at 82% -14%, rgb(var(--accent) / 0.035), transparent 70%);
   pointer-events: none;
   z-index: 0;
 }
@@ -121,12 +121,9 @@ body > * { position: relative; z-index: 1; }
 .btn-primary {
   background-color: rgb(var(--brand));
   color: rgb(var(--brand-fg));
-  box-shadow:
-    0 0 0 1px rgb(var(--brand) / 0.35),
-    0 10px 24px -10px rgb(var(--brand) / 0.55);
   transition: filter 150ms ease, transform 100ms ease;
 }
-.btn-primary:hover { filter: brightness(1.08); }
+.btn-primary:hover { filter: brightness(1.06); }
 .btn-primary:active { transform: translateY(0.5px); }
 .btn-primary:disabled { opacity: 0.5; }
 

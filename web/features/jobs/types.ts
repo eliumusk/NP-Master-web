@@ -93,7 +93,7 @@ export type JobWorkspacePayload = {
 
 export type RegionFilters = {
   safeOnly: boolean;
-  genome: string;
+  contig: string;
   bgcType: string;
   tier: string;
   query: string;

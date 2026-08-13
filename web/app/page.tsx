@@ -18,7 +18,7 @@ export default async function HomePage() {
           </div>
           <h1 className="mt-5 max-w-2xl text-4xl font-semibold leading-[1.12] tracking-[-0.02em] sm:text-5xl">
             {t.home.titleA}
-            <span className="bg-gradient-to-r from-brand to-accent bg-clip-text text-transparent"> BGC </span>
+            <span className="text-brand">BGC</span>
             {t.home.titleB}
           </h1>
           <p className="mt-5 max-w-xl text-[15px] leading-7 text-fg-muted">
