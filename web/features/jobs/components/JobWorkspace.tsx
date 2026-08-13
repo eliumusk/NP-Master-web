@@ -67,11 +67,11 @@ export function JobWorkspace({
   }, [filteredRegions, selectedRegion]);
 
   return (
-    <div className="space-y-6">
+    <div className="animate-fade-in space-y-5">
       <JobHeader job={job} />
       <JobOverview job={job} genomes={genomes} regions={regions} />
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.12fr)_minmax(25rem,0.88fr)]">
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_27rem]">
         <RegionExplorer
           regions={filteredRegions}
           allRegions={regions}
@@ -80,7 +80,9 @@ export function JobWorkspace({
           onFiltersChange={setFilters}
           onSelectRegion={setSelectedRegionId}
         />
-        <RegionDetail region={selectedRegion} />
+        <div className="xl:sticky xl:top-20 xl:max-h-[calc(100vh-6.5rem)] xl:overflow-y-auto xl:pr-1">
+          <RegionDetail region={selectedRegion} />
+        </div>
       </div>
 
       <ArtifactDownloads artifacts={artifacts} />

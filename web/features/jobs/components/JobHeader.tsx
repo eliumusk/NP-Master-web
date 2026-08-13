@@ -1,31 +1,51 @@
+"use client";
+
 import { JobStatusBadge } from "@/components/JobStatusBadge";
+import { useI18n } from "@/lib/i18n/client";
 import { formatDateTime, formatDuration } from "../format";
 import type { JobSummary } from "../types";
+import { JobTimeline } from "./JobTimeline";
 
 export function JobHeader({ job }: { job: JobSummary }) {
+  const { t } = useI18n();
+
   return (
     <section className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="min-w-0 text-2xl font-semibold">{job.title}</h1>
-        <JobStatusBadge status={job.status} />
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h1 className="min-w-0 text-2xl font-semibold tracking-tight">{job.title}</h1>
+        <JobStatusBadge status={job.status} labels={t.status} />
+        <span className="font-mono text-xs text-fg-subtle">#{job.id.slice(0, 8)}</span>
       </div>
 
-      <div className="grid gap-3 rounded-card border border-border bg-elevated/30 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-        <Meta label="创建" value={formatDateTime(job.created_at)} />
-        <Meta label="开始" value={formatDateTime(job.started_at)} />
-        <Meta label="完成" value={formatDateTime(job.finished_at)} />
-        <Meta label="运行时长" value={formatDuration(job.started_at, job.finished_at)} />
-        <Meta label="ALT_OP" value={`${job.threshold.toFixed(2)} / ${job.extend_threshold.toFixed(2)} / ${job.min_support_windows} 窗口`} />
-        <Meta label="最小区域" value={`${job.min_len_bp.toLocaleString()} bp`} />
-        <Meta label="扩展 flank" value={`${job.extend_flank_bp.toLocaleString()} bp`} />
-        <Meta label="最低安全等级" value={job.safe_tier_min} />
+      <div className="panel px-5 py-4">
+        <JobTimeline job={job} />
       </div>
 
-      {(job.log_tail || job.error) && (
-        <div className="rounded-card border border-border bg-surface p-4">
-          {job.log_tail && <pre className="whitespace-pre-wrap text-xs text-fg-muted">{job.log_tail}</pre>}
-          {job.error && <pre className="mt-3 whitespace-pre-wrap text-xs text-red-600">{job.error}</pre>}
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-card border border-white/[0.06] bg-white/[0.05] sm:grid-cols-4">
+        <Meta label={t.workspace.created} value={formatDateTime(job.created_at)} />
+        <Meta label={t.workspace.started} value={formatDateTime(job.started_at)} />
+        <Meta label={t.workspace.finished} value={formatDateTime(job.finished_at)} />
+        <Meta label={t.workspace.duration} value={formatDuration(job.started_at, job.finished_at)} />
+        <Meta label={t.workspace.threshold} value={`${job.threshold.toFixed(2)} / ${job.extend_threshold.toFixed(2)}`} />
+        <Meta label={t.workspace.windows} value={`${job.min_support_windows}`} />
+        <Meta label={t.workspace.minLen} value={`${job.min_len_bp.toLocaleString()} bp`} />
+        <Meta label={t.workspace.flank} value={`${job.extend_flank_bp.toLocaleString()} bp`} />
+      </div>
+
+      {job.error && (
+        <div className="rounded-card border border-rose-400/30 bg-rose-400/10 p-4">
+          <pre className="whitespace-pre-wrap text-xs text-rose-200">{job.error}</pre>
         </div>
+      )}
+
+      {job.log_tail && (
+        <details className="panel group p-4">
+          <summary className="cursor-pointer select-none text-xs font-medium text-fg-muted transition hover:text-fg">
+            {t.workspace.runLog}
+            <span className="ml-2 inline-block text-fg-subtle transition group-open:rotate-90">▸</span>
+          </summary>
+          <pre className="mt-3 whitespace-pre-wrap font-mono text-xs leading-5 text-fg-muted">{job.log_tail}</pre>
+        </details>
       )}
     </section>
   );
@@ -33,9 +53,9 @@ export function JobHeader({ job }: { job: JobSummary }) {
 
 function Meta({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
-      <div className="text-xs text-fg-muted">{label}</div>
-      <div className="numeric-display mt-1 truncate text-sm font-medium">{value}</div>
+    <div className="min-w-0 bg-surface px-4 py-3">
+      <div className="text-[11px] text-fg-subtle">{label}</div>
+      <div className="numeric-display mt-1 truncate text-[13px] font-medium text-fg">{value}</div>
     </div>
   );
 }

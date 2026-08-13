@@ -1,9 +1,30 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
-import Link from "next/link";
+import localFont from "next/font/local";
+import { Noto_Sans_SC } from "next/font/google";
 import { getOptionalUser } from "@/lib/supabase/server";
-import { LogoutButton } from "@/components/LogoutButton";
-import { Logo } from "@/components/Logo";
+import { SiteHeader } from "@/components/SiteHeader";
+import { I18nProvider } from "@/lib/i18n/client";
+import { getDictionary } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/server";
+
+const inter = localFont({
+  src: "./fonts/InterVariable.woff2",
+  variable: "--font-inter",
+  display: "swap",
+});
+
+const jbMono = localFont({
+  src: "./fonts/JetBrainsMonoVariable.woff2",
+  variable: "--font-jbmono",
+  display: "swap",
+});
+
+const notoSC = Noto_Sans_SC({
+  variable: "--font-noto-sc",
+  display: "swap",
+  preload: false, // CJK uses unicode-range slices; nothing meaningful to preload
+});
 
 export const metadata: Metadata = {
   title: "BGCMaster",
@@ -11,53 +32,27 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#020617" },
-  ],
+  themeColor: [{ media: "(prefers-color-scheme: dark)", color: "#04070d" }],
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const user = await getOptionalUser();
+  const [user, locale] = await Promise.all([getOptionalUser(), getServerLocale()]);
+  const t = getDictionary(locale);
 
   return (
-    <html lang="zh-CN">
+    <html lang={locale === "en" ? "en" : "zh-CN"} className={`${inter.variable} ${jbMono.variable} ${notoSC.variable}`}>
       <body className="min-h-screen bg-bg font-sans text-fg antialiased">
-        <header className="border-b border-border bg-bg/90">
-          <div className="mx-auto flex h-14 max-w-content items-center justify-between px-4">
-            <Link href="/" className="flex items-center gap-2 font-semibold">
-              <Logo className="h-6 w-6 text-brand" />
-              <span>BGCMaster</span>
-            </Link>
-            <nav className="flex items-center gap-1 text-sm">
-              <NavLink href="/submit">提交任务</NavLink>
-              <NavLink href="/jobs">任务记录</NavLink>
-              {user ? (
-                <div className="ml-2 flex items-center gap-2 border-l border-border pl-3">
-                  <span className="hidden max-w-52 truncate text-xs text-fg-muted sm:inline">{user.email}</span>
-                  <LogoutButton />
-                </div>
-              ) : (
-                <Link
-                  href="/login"
-                  className="ml-2 rounded-btn bg-brand px-3 py-1.5 text-sm font-medium text-brand-fg"
-                >
-                  登录
-                </Link>
-              )}
-            </nav>
-          </div>
-        </header>
-        <main className="mx-auto max-w-content px-4 py-8">{children}</main>
+        <I18nProvider locale={locale}>
+          <SiteHeader email={user?.email ?? null} />
+          <main className="mx-auto w-full max-w-[92rem] px-5 py-8">{children}</main>
+          <footer className="mx-auto w-full max-w-[92rem] px-5 pb-8 pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] pt-5 text-xs text-fg-subtle">
+              <span>{t.footer.methods}</span>
+              <span className="numeric-display">bgcmaster.bio</span>
+            </div>
+          </footer>
+        </I18nProvider>
       </body>
     </html>
-  );
-}
-
-function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link href={href} className="rounded-btn px-3 py-1.5 text-fg-muted hover:bg-elevated hover:text-fg">
-      {children}
-    </Link>
   );
 }

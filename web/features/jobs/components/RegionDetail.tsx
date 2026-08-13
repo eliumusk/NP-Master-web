@@ -1,7 +1,11 @@
+"use client";
+
+import { useI18n } from "@/lib/i18n/client";
 import { bgcTypeMeta, functionClassMeta, tierClassName, tierLabel } from "../constants";
 import { formatBp, formatPercent, formatRange, formatScore } from "../format";
 import { countDomains, countFunctionClasses, extendedLength, regionLength } from "../stats";
 import type { CdsFeature, MibigHit, PfamDomain, Region } from "../types";
+import { GeneTrack } from "./GeneTrack";
 
 type DomainRow = PfamDomain & {
   locusTag: string;
@@ -9,10 +13,12 @@ type DomainRow = PfamDomain & {
 };
 
 export function RegionDetail({ region }: { region: Region | null }) {
+  const { t, locale } = useI18n();
+
   if (!region) {
     return (
-      <aside className="rounded-card border border-dashed border-border bg-elevated/30 p-8 text-center text-sm text-fg-muted">
-        选择一个区域查看 CDS、Pfam 和类型证据。
+      <aside className="rounded-card border border-dashed border-white/[0.1] bg-white/[0.02] p-10 text-center text-sm text-fg-muted">
+        {t.detail.empty}
       </aside>
     );
   }
@@ -23,90 +29,97 @@ export function RegionDetail({ region }: { region: Region | null }) {
 
   return (
     <aside className="min-w-0 space-y-4">
-      <section className="rounded-card border border-border bg-surface p-4">
+      <section className="panel p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="truncate text-lg font-semibold">区域详情</h2>
+            <h2 className="text-[15px] font-semibold">{t.detail.title}</h2>
             <p className="mt-1 truncate font-mono text-xs text-fg-muted">{region.genome_name} · {region.contig}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <span className={`inline-flex rounded-pill px-2 py-0.5 text-xs font-medium ${typeMeta.className}`}>{typeMeta.label}</span>
-            <span className={`inline-flex rounded-pill px-2 py-0.5 text-xs font-medium ${tierClassName(region.safe_tier, region.safe_pass)}`}>
-              {tierLabel(region.safe_tier)}
+            <span className={`inline-flex rounded-pill px-2 py-0.5 text-[11px] font-medium ${typeMeta.className}`}>{typeMeta.label}</span>
+            <span className={`inline-flex rounded-pill px-2 py-0.5 text-[11px] font-medium ${tierClassName(region.safe_tier, region.safe_pass)}`}>
+              {tierLabel(region.safe_tier, locale)}
             </span>
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <Meta label="核心坐标" value={formatRange(region.start_bp, region.end_bp)} />
+        <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-btn border border-white/[0.06] bg-white/[0.05]">
+          <Meta label={t.detail.metaCore} value={formatRange(region.start_bp, region.end_bp)} />
           <Meta
-            label="扩展坐标"
+            label={t.detail.metaExt}
             value={region.ext_start_bp == null || region.ext_end_bp == null ? "-" : formatRange(region.ext_start_bp, region.ext_end_bp)}
           />
-          <Meta label="核心长度" value={formatBp(regionLength(region))} />
-          <Meta label="扩展长度" value={extendedLength(region) == null ? "-" : formatBp(extendedLength(region))} />
-          <Meta label="区域分数" value={formatScore(region.score)} />
-          <Meta label="类型分数" value={formatScore(region.type_score)} />
-          <Meta label="安全标签" value={region.safe_type_label || "-"} />
-          <Meta label="CDS / Pfam" value={`${region.cds_features?.length ?? 0} / ${countDomains(region.cds_features)}`} />
+          <Meta label={t.detail.metaCoreLen} value={formatBp(regionLength(region))} />
+          <Meta label={t.detail.metaExtLen} value={extendedLength(region) == null ? "-" : formatBp(extendedLength(region))} />
+          <Meta label={t.detail.metaScore} value={formatScore(region.score)} />
+          <Meta label={t.detail.metaTypeScore} value={formatScore(region.type_score)} />
+          <Meta label={t.detail.metaSafeLabel} value={region.safe_type_label || "-"} />
+          <Meta label={t.detail.metaCdsPfam} value={`${region.cds_features?.length ?? 0} / ${countDomains(region.cds_features)}`} />
         </div>
       </section>
 
-      <section className="rounded-card border border-border bg-surface p-4">
-        <h3 className="text-sm font-semibold">类型概率</h3>
-        <TypeScores scores={region.type_scores} />
+      <section className="panel p-5">
+        <div className="flex items-baseline justify-between gap-3">
+          <h3 className="text-sm font-semibold">{t.detail.track}</h3>
+          <span className="text-[11px] text-fg-subtle">{t.detail.trackNote}</span>
+        </div>
+        <GeneTrack region={region} />
       </section>
 
-      <section className="rounded-card border border-border bg-surface p-4">
-        <h3 className="text-sm font-semibold">功能域概览</h3>
+      <section className="panel p-5">
+        <h3 className="text-sm font-semibold">{t.detail.typeScores}</h3>
+        <TypeScores scores={region.type_scores} noData={t.detail.noTypeScores} />
+      </section>
+
+      <section className="panel p-5">
+        <h3 className="text-sm font-semibold">{t.detail.functionOverview}</h3>
         {functionCounts.length === 0 ? (
-          <div className="mt-3 text-sm text-fg-muted">暂无 CDS 注释。</div>
+          <div className="mt-3 text-sm text-fg-muted">{t.detail.noCds}</div>
         ) : (
           <div className="mt-3 flex flex-wrap gap-2">
             {functionCounts.map((item) => {
-              const meta = functionClassMeta(item.key);
+              const meta = functionClassMeta(item.key, locale);
               return (
-                <span key={item.key} className={`inline-flex rounded-pill px-2 py-1 text-xs font-medium ${meta.className}`}>
+                <span key={item.key} className={`inline-flex rounded-pill px-2 py-1 text-[11px] font-medium ${meta.className}`}>
                   {meta.label} · {item.count}
                 </span>
               );
             })}
           </div>
         )}
-        <CdsTrack region={region} />
       </section>
 
-      <section className="rounded-card border border-border bg-surface p-4">
+      <section className="panel p-5">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold">CDS 明细</h3>
-          <span className="numeric-display text-xs text-fg-muted">{region.cds_features?.length ?? 0}</span>
+          <h3 className="text-sm font-semibold">{t.detail.cdsTable}</h3>
+          <span className="numeric-display text-xs text-fg-subtle">{region.cds_features?.length ?? 0}</span>
         </div>
         <CdsTable cdsFeatures={region.cds_features ?? []} />
       </section>
 
-      <section className="rounded-card border border-border bg-surface p-4">
+      <section className="panel p-5">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold">Pfam hits</h3>
-          <span className="numeric-display text-xs text-fg-muted">{domainRows.length}</span>
+          <h3 className="text-sm font-semibold">{t.detail.pfamTable}</h3>
+          <span className="numeric-display text-xs text-fg-subtle">{domainRows.length}</span>
         </div>
         <DomainTable domains={domainRows} />
       </section>
 
-      <section className="rounded-card border border-border bg-surface p-4">
-        <h3 className="text-sm font-semibold">MIBiG 近邻</h3>
+      <section className="panel p-5">
+        <h3 className="text-sm font-semibold">{t.detail.mibigList}</h3>
         <MibigList hits={region.mibig_hits ?? []} />
       </section>
     </aside>
   );
 }
 
-function TypeScores({ scores }: { scores: Record<string, number> | null }) {
+function TypeScores({ scores, noData }: { scores: Record<string, number> | null; noData: string }) {
   const items = Object.entries(scores ?? {})
     .filter(([, value]) => Number.isFinite(Number(value)))
     .sort((a, b) => Number(b[1]) - Number(a[1]));
 
   if (items.length === 0) {
-    return <div className="mt-3 text-sm text-fg-muted">暂无分类概率。</div>;
+    return <div className="mt-3 text-sm text-fg-muted">{noData}</div>;
   }
 
   return (
@@ -117,10 +130,10 @@ function TypeScores({ scores }: { scores: Record<string, number> | null }) {
         return (
           <div key={type} className="grid grid-cols-[6.5rem,1fr,3.5rem] items-center gap-2 text-xs">
             <div className="truncate text-fg-muted">{meta.label}</div>
-            <div className="h-2 overflow-hidden rounded-pill bg-elevated">
+            <div className="h-1.5 overflow-hidden rounded-pill bg-white/[0.06]">
               <div className={`h-full rounded-pill ${meta.barClassName}`} style={{ width: `${Math.max(2, Math.min(100, normalized * 100))}%` }} />
             </div>
-            <div className="numeric-display text-right">{formatPercent(Number(value))}</div>
+            <div className="numeric-display text-right text-fg">{formatPercent(Number(value))}</div>
           </div>
         );
       })}
@@ -128,72 +141,39 @@ function TypeScores({ scores }: { scores: Record<string, number> | null }) {
   );
 }
 
-function CdsTrack({ region }: { region: Region }) {
-  const cdsFeatures = region.cds_features ?? [];
-  if (cdsFeatures.length === 0) return null;
-
-  const extent = Math.max(regionLength(region), ...cdsFeatures.map((cds) => Number(cds.end ?? 0)));
-
-  return (
-    <div className="mt-4 overflow-hidden rounded-btn border border-border bg-elevated/30 p-3">
-      <div className="relative h-16">
-        <div className="absolute left-0 right-0 top-7 h-px bg-border" />
-        {cdsFeatures.map((cds, index) => {
-          const start = Math.max(0, Number(cds.start ?? 0));
-          const end = Math.max(start + 1, Number(cds.end ?? start + 1));
-          const left = (start / extent) * 100;
-          const width = Math.max(0.8, ((end - start) / extent) * 100);
-          const meta = functionClassMeta(cds.function_class);
-          return (
-            <div
-              key={`${cds.locus_tag ?? "cds"}-${index}`}
-              title={`${cds.locus_tag ?? "CDS"} ${start}-${end}`}
-              className={`absolute top-4 h-6 rounded-btn border border-bg/60 ${meta.className}`}
-              style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}
-            />
-          );
-        })}
-      </div>
-      <div className="mt-2 flex justify-between text-xs text-fg-muted">
-        <span>0 bp</span>
-        <span>{formatBp(extent)}</span>
-      </div>
-    </div>
-  );
-}
-
 function CdsTable({ cdsFeatures }: { cdsFeatures: CdsFeature[] }) {
+  const { t, locale } = useI18n();
   if (cdsFeatures.length === 0) {
-    return <div className="mt-3 text-sm text-fg-muted">暂无 CDS 注释。</div>;
+    return <div className="mt-3 text-sm text-fg-muted">{t.detail.noCds}</div>;
   }
 
   return (
-    <div className="mt-3 max-h-80 overflow-auto rounded-btn border border-border">
+    <div className="mt-3 max-h-80 overflow-auto rounded-btn border border-white/[0.06]">
       <table className="w-full min-w-[38rem] text-xs">
-        <thead className="sticky top-0 bg-elevated text-left text-fg-muted">
-          <tr>
-            <th className="px-3 py-2 font-medium">locus</th>
-            <th className="px-3 py-2 font-medium">位置</th>
-            <th className="px-3 py-2 font-medium">方向</th>
-            <th className="px-3 py-2 font-medium">功能</th>
-            <th className="px-3 py-2 font-medium">Pfam</th>
+        <thead className="sticky top-0 bg-surface/95 text-left backdrop-blur-sm">
+          <tr className="border-b border-white/[0.06] text-[11px] uppercase tracking-wider text-fg-subtle">
+            <th className="px-3 py-2.5 font-medium">{t.detail.colLocus}</th>
+            <th className="px-3 py-2.5 font-medium">{t.detail.colPos}</th>
+            <th className="px-3 py-2.5 font-medium">{t.detail.colStrand}</th>
+            <th className="px-3 py-2.5 font-medium">{t.detail.colFunc}</th>
+            <th className="px-3 py-2.5 font-medium">{t.detail.colPfam}</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-border">
+        <tbody>
           {cdsFeatures.map((cds, index) => {
-            const meta = functionClassMeta(cds.function_class);
+            const meta = functionClassMeta(cds.function_class, locale);
             return (
-              <tr key={`${cds.locus_tag ?? "cds"}-${index}`}>
+              <tr key={`${cds.locus_tag ?? "cds"}-${index}`} className="border-b border-white/[0.04] last:border-0">
                 <td className="max-w-[10rem] px-3 py-2">
-                  <div className="truncate font-mono">{cds.locus_tag || "-"}</div>
-                  <div className="mt-1 truncate text-fg-muted">{cds.product || "-"}</div>
+                  <div className="truncate font-mono text-fg">{cds.locus_tag || "-"}</div>
+                  <div className="mt-0.5 truncate text-fg-subtle">{cds.product || "-"}</div>
                 </td>
-                <td className="numeric-display px-3 py-2">{formatRange(Number(cds.start ?? 0), Number(cds.end ?? 0))}</td>
-                <td className="numeric-display px-3 py-2">{Number(cds.strand ?? 1) < 0 ? "-" : "+"}</td>
+                <td className="numeric-display px-3 py-2 text-fg-muted">{formatRange(Number(cds.start ?? 0), Number(cds.end ?? 0))}</td>
+                <td className="numeric-display px-3 py-2 text-fg-muted">{Number(cds.strand ?? 1) < 0 ? "−" : "+"}</td>
                 <td className="px-3 py-2">
-                  <span className={`inline-flex rounded-pill px-2 py-0.5 font-medium ${meta.className}`}>{meta.label}</span>
+                  <span className={`inline-flex rounded-pill px-2 py-0.5 text-[11px] font-medium ${meta.className}`}>{meta.label}</span>
                 </td>
-                <td className="px-3 py-2">{cds.pfam_domains?.length ?? 0}</td>
+                <td className="numeric-display px-3 py-2 text-fg-muted">{cds.pfam_domains?.length ?? 0}</td>
               </tr>
             );
           })}
@@ -204,36 +184,37 @@ function CdsTable({ cdsFeatures }: { cdsFeatures: CdsFeature[] }) {
 }
 
 function DomainTable({ domains }: { domains: DomainRow[] }) {
+  const { t, locale } = useI18n();
   if (domains.length === 0) {
-    return <div className="mt-3 text-sm text-fg-muted">暂无 Pfam 命中。</div>;
+    return <div className="mt-3 text-sm text-fg-muted">{t.detail.noPfam}</div>;
   }
 
   return (
-    <div className="mt-3 max-h-80 overflow-auto rounded-btn border border-border">
+    <div className="mt-3 max-h-80 overflow-auto rounded-btn border border-white/[0.06]">
       <table className="w-full min-w-[42rem] text-xs">
-        <thead className="sticky top-0 bg-elevated text-left text-fg-muted">
-          <tr>
-            <th className="px-3 py-2 font-medium">CDS</th>
-            <th className="px-3 py-2 font-medium">domain</th>
-            <th className="px-3 py-2 text-right font-medium">bitscore</th>
-            <th className="px-3 py-2 text-right font-medium">e-value</th>
-            <th className="px-3 py-2 font-medium">范围</th>
+        <thead className="sticky top-0 bg-surface/95 text-left backdrop-blur-sm">
+          <tr className="border-b border-white/[0.06] text-[11px] uppercase tracking-wider text-fg-subtle">
+            <th className="px-3 py-2.5 font-medium">{t.detail.colCds}</th>
+            <th className="px-3 py-2.5 font-medium">{t.detail.colDomain}</th>
+            <th className="px-3 py-2.5 text-right font-medium">{t.detail.colBits}</th>
+            <th className="px-3 py-2.5 text-right font-medium">{t.detail.colEvalue}</th>
+            <th className="px-3 py-2.5 font-medium">{t.detail.colRange}</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-border">
+        <tbody>
           {domains.map((domain, index) => (
-            <tr key={`${domain.locusTag}-${domain.accession ?? domain.name}-${index}`}>
+            <tr key={`${domain.locusTag}-${domain.accession ?? domain.name}-${index}`} className="border-b border-white/[0.04] last:border-0">
               <td className="max-w-[10rem] px-3 py-2">
-                <div className="truncate font-mono">{domain.locusTag}</div>
-                <div className="mt-1 truncate text-fg-muted">{functionClassMeta(domain.functionClass).label}</div>
+                <div className="truncate font-mono text-fg">{domain.locusTag}</div>
+                <div className="mt-0.5 truncate text-fg-subtle">{functionClassMeta(domain.functionClass, locale).label}</div>
               </td>
               <td className="max-w-[13rem] px-3 py-2">
-                <div className="truncate font-medium">{domain.name || "-"}</div>
-                <div className="mt-1 truncate font-mono text-fg-muted">{domain.accession || "-"}</div>
+                <div className="truncate font-medium text-fg">{domain.name || "-"}</div>
+                <div className="mt-0.5 truncate font-mono text-fg-subtle">{domain.accession || "-"}</div>
               </td>
-              <td className="numeric-display px-3 py-2 text-right">{formatScore(domain.bitscore, 1)}</td>
-              <td className="numeric-display px-3 py-2 text-right">{formatScientific(domain.e_value)}</td>
-              <td className="numeric-display px-3 py-2">
+              <td className="numeric-display px-3 py-2 text-right text-fg-muted">{formatScore(domain.bitscore, 1)}</td>
+              <td className="numeric-display px-3 py-2 text-right text-fg-muted">{formatScientific(domain.e_value)}</td>
+              <td className="numeric-display px-3 py-2 text-fg-muted">
                 {domain.env_start == null || domain.env_end == null ? "-" : `${domain.env_start}-${domain.env_end}`}
               </td>
             </tr>
@@ -245,19 +226,20 @@ function DomainTable({ domains }: { domains: DomainRow[] }) {
 }
 
 function MibigList({ hits }: { hits: MibigHit[] }) {
+  const { t } = useI18n();
   if (hits.length === 0) {
-    return <div className="mt-3 text-sm text-fg-muted">暂无 MIBiG 近邻。</div>;
+    return <div className="mt-3 text-sm text-fg-muted">{t.detail.noMibig}</div>;
   }
 
   return (
-    <div className="mt-3 space-y-2">
+    <div className="mt-3 space-y-1.5">
       {hits.slice(0, 6).map((hit, index) => (
-        <div key={`${hit.bgc_id ?? "hit"}-${index}`} className="rounded-btn border border-border bg-elevated/30 px-3 py-2 text-xs">
+        <div key={`${hit.bgc_id ?? "hit"}-${index}`} className="rounded-btn border border-white/[0.05] bg-white/[0.02] px-3 py-2 text-xs">
           <div className="flex items-center justify-between gap-3">
-            <span className="truncate font-mono font-medium">{hit.bgc_id || "-"}</span>
-            <span className="numeric-display shrink-0 text-fg-muted">{hit.identity == null ? "-" : formatPercent(hit.identity)}</span>
+            <span className="truncate font-mono font-medium text-fg">{hit.bgc_id || "-"}</span>
+            <span className="numeric-display shrink-0 text-brand">{hit.identity == null ? "-" : formatPercent(hit.identity)}</span>
           </div>
-          <div className="mt-1 truncate text-fg-muted">{hit.product || "未知产物"}</div>
+          <div className="mt-0.5 truncate text-fg-subtle">{hit.product || t.explorer.unknownProduct}</div>
         </div>
       ))}
     </div>
@@ -266,9 +248,9 @@ function MibigList({ hits }: { hits: MibigHit[] }) {
 
 function Meta({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-btn border border-border bg-elevated/30 px-3 py-2">
-      <div className="text-xs text-fg-muted">{label}</div>
-      <div className="numeric-display mt-1 truncate text-sm font-medium">{value}</div>
+    <div className="min-w-0 bg-surface px-3 py-2.5">
+      <div className="text-[11px] text-fg-subtle">{label}</div>
+      <div className="numeric-display mt-0.5 truncate text-[13px] font-medium text-fg">{value}</div>
     </div>
   );
 }

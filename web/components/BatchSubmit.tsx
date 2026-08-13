@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getOrCreateClientId } from "@/lib/clientId";
 import { sha256OfBlob, sniffFasta } from "@/lib/fasta";
+import { useI18n } from "@/lib/i18n/client";
 
 const ANON_MAX_BYTES = 10 * 1024 * 1024;
 const AUTH_MAX_BYTES = 50 * 1024 * 1024;
@@ -30,11 +31,12 @@ type UploadTicket = {
 
 export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boolean; compact?: boolean }) {
   const router = useRouter();
+  const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<Picked[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
-  const [title, setTitle] = useState("BGCMaster 批量分析");
+  const [title, setTitle] = useState<string>(t.submit.defaultTitle);
   const [threshold, setThreshold] = useState(0.95);
   const [extendThreshold, setExtendThreshold] = useState(0.8);
   const [safeTierMin, setSafeTierMin] = useState("Tier2");
@@ -53,7 +55,10 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
       const item: Picked = { file, genomeName: genomeNameFromFile(file.name), progress: 0 };
       if (file.size > maxBytes) {
         item.ok = false;
-        item.message = `文件大小 ${(file.size / 1024 / 1024).toFixed(1)} MB，限制为 ${(maxBytes / 1024 / 1024).toFixed(0)} MB。`;
+        item.message = t.submit.errTooLarge(
+          (file.size / 1024 / 1024).toFixed(1),
+          (maxBytes / 1024 / 1024).toFixed(0),
+        );
       } else {
         const sniff = await sniffFasta(file);
         item.ok = sniff.ok;
@@ -71,15 +76,15 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
   async function submit() {
     setError("");
     if (validFiles.length === 0) {
-      setError("请至少选择一个有效的 FASTA 文件。");
+      setError(t.submit.errNoFiles);
       return;
     }
     if (!isLoggedIn && validFiles.length > 1) {
-      setError("匿名模式一次只能提交一个 FASTA。");
+      setError(t.submit.errAnonMulti);
       return;
     }
     if (extendThreshold > threshold) {
-      setError("扩展阈值必须小于或等于起始阈值。");
+      setError(t.submit.errThreshold);
       return;
     }
 
@@ -114,7 +119,7 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
         }),
       });
       const created = await createRes.json().catch(() => ({}));
-      if (!createRes.ok) throw new Error(created.error ?? `创建任务失败 (${createRes.status})`);
+      if (!createRes.ok) throw new Error(created.error ?? t.submit.errCreateFailed(createRes.status));
 
       const tickets = created.uploads as UploadTicket[];
       setPhase("uploading");
@@ -136,7 +141,7 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
         body: JSON.stringify({ clientId }),
       });
       const done = await doneRes.json().catch(() => ({}));
-      if (!doneRes.ok) throw new Error(done.error ?? `加入队列失败 (${doneRes.status})`);
+      if (!doneRes.ok) throw new Error(done.error ?? t.submit.errQueueFailed(doneRes.status));
       router.push(`/jobs/${created.jobId}`);
     } catch (e) {
       setPhase("error");
@@ -145,15 +150,15 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
   }
 
   return (
-    <section className="rounded-section border border-border bg-surface p-5">
+    <section className="panel p-5">
       <div className="space-y-4">
         {!compact && (
           <label className="block">
-            <span className="text-sm font-medium">任务标题</span>
+            <span className="text-sm font-medium">{t.submit.jobTitle}</span>
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="mt-1 w-full rounded-btn border border-border bg-bg px-3 py-2 text-sm"
+              className="mt-1.5 w-full rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-sm outline-none transition placeholder:text-fg-subtle focus:border-brand/60"
             />
           </label>
         )}
@@ -165,7 +170,7 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
             e.preventDefault();
             void addFiles(e.dataTransfer.files);
           }}
-          className="cursor-pointer rounded-card border-2 border-dashed border-border bg-elevated/30 p-6 text-center hover:border-brand"
+          className="group cursor-pointer rounded-card border border-dashed border-white/[0.14] bg-white/[0.02] p-8 text-center transition hover:border-brand/50 hover:bg-brand/[0.04]"
         >
           <input
             ref={inputRef}
@@ -175,34 +180,39 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
             className="sr-only"
             onChange={(e) => e.target.files && void addFiles(e.target.files)}
           />
-          <div className="text-sm font-medium">拖入 FASTA 文件，或点击选择</div>
-          <div className="mt-1 text-xs text-fg-muted">
-            {isLoggedIn ? `最多 ${AUTH_MAX_FILES} 个文件，每个 50 MB` : "匿名模式：1 个文件，10 MB"}
+          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-btn bg-brand-soft text-brand transition group-hover:bg-brand-softer">
+            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 14V4m0 0L6 8m4-4l4 4M4 16h12" />
+            </svg>
+          </div>
+          <div className="mt-3 text-sm font-medium">{t.submit.dropMain}</div>
+          <div className="mt-1 text-xs text-fg-subtle">
+            {isLoggedIn ? t.submit.dropAuth : t.submit.dropAnon}
           </div>
         </div>
 
         {files.length > 0 && (
           <div className="space-y-2">
             {files.map((item, i) => (
-              <div key={`${item.file.name}-${i}`} className="rounded-card border border-border p-3">
+              <div key={`${item.file.name}-${i}`} className="rounded-btn border border-white/[0.06] bg-white/[0.02] p-3">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <input
                       value={item.genomeName}
                       onChange={(e) => setFiles((xs) => xs.map((x, idx) => idx === i ? { ...x, genomeName: e.target.value } : x))}
-                      className="w-full rounded-btn border border-border bg-bg px-2 py-1 font-mono text-xs"
+                      className="w-full rounded-btn border border-white/[0.08] bg-bg px-2 py-1 font-mono text-xs outline-none focus:border-brand/60"
                     />
-                    <div className={`mt-1 text-xs ${item.ok === false ? "text-red-600" : "text-fg-muted"}`}>
-                      {item.file.name} · {item.message ?? "等待检查"}
+                    <div className={`mt-1.5 text-xs ${item.ok === false ? "text-rose-300" : "text-fg-muted"}`}>
+                      {item.file.name} · {item.message ?? t.submit.waitingCheck}
                     </div>
                   </div>
-                  <button type="button" onClick={() => removeAt(i)} className="rounded-btn px-2 py-1 text-xs text-fg-muted hover:bg-elevated">
-                    移除
+                  <button type="button" onClick={() => removeAt(i)} className="rounded-btn px-2 py-1 text-xs text-fg-subtle transition hover:bg-elevated hover:text-fg">
+                    {t.submit.remove}
                   </button>
                 </div>
                 {(item.progress ?? 0) > 0 && (
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-pill bg-elevated">
-                    <div className="h-full bg-brand" style={{ width: `${item.progress ?? 0}%` }} />
+                  <div className="mt-2 h-1 overflow-hidden rounded-pill bg-white/[0.06]">
+                    <div className="h-full rounded-pill bg-gradient-to-r from-brand/70 to-brand transition-all" style={{ width: `${item.progress ?? 0}%` }} />
                   </div>
                 )}
               </div>
@@ -210,34 +220,40 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-3">
-          <NumberField label="起始阈值" value={threshold} setValue={setThreshold} min={0.05} max={0.99} step={0.01} />
-          <NumberField label="扩展阈值" value={extendThreshold} setValue={setExtendThreshold} min={0.05} max={0.99} step={0.01} />
-          <label className="block">
-            <span className="text-xs font-medium text-fg-muted">最低安全等级</span>
-            <select
-              value={safeTierMin}
-              onChange={(e) => setSafeTierMin(e.target.value)}
-              className="mt-1 w-full rounded-btn border border-border bg-bg px-3 py-2 text-sm"
-            >
-              {["Tier1", "Tier2", "Tier3", "Tier4", "Tier5"].map((tier) => <option key={tier}>{tier}</option>)}
-            </select>
-          </label>
-        </div>
+        <details className="group rounded-btn border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+          <summary className="flex cursor-pointer select-none items-center justify-between text-xs font-medium text-fg-muted transition hover:text-fg">
+            {t.submit.advanced}
+            <span className="text-fg-subtle transition group-open:rotate-90">▸</span>
+          </summary>
+          <div className="mt-3 grid gap-3 pb-1 sm:grid-cols-3">
+            <NumberField label={t.submit.threshold} value={threshold} setValue={setThreshold} min={0.05} max={0.99} step={0.01} />
+            <NumberField label={t.submit.extendThreshold} value={extendThreshold} setValue={setExtendThreshold} min={0.05} max={0.99} step={0.01} />
+            <label className="block">
+              <span className="text-[11px] font-medium text-fg-muted">{t.submit.safeTierMin}</span>
+              <select
+                value={safeTierMin}
+                onChange={(e) => setSafeTierMin(e.target.value)}
+                className="mt-1 w-full rounded-btn border border-white/[0.08] bg-bg px-2.5 py-2 text-sm outline-none focus:border-brand/60"
+              >
+                {["Tier1", "Tier2", "Tier3", "Tier4", "Tier5"].map((tier) => <option key={tier}>{tier}</option>)}
+              </select>
+            </label>
+          </div>
+        </details>
 
-        {error && <div className="rounded-card border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+        {error && <div className="rounded-card border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-200">{error}</div>}
 
         <button
           type="button"
           disabled={busy}
           onClick={() => void submit()}
-          className="w-full rounded-btn bg-brand px-4 py-2.5 text-sm font-medium text-brand-fg disabled:opacity-50"
+          className="btn-primary w-full rounded-btn px-4 py-2.5 text-sm font-semibold"
         >
-          {phase === "idle" || phase === "error" ? "创建 BGCMaster 任务" :
-           phase === "hashing" ? "正在计算文件指纹..." :
-           phase === "creating" ? "正在创建任务..." :
-           phase === "uploading" ? "正在上传 FASTA..." :
-           "正在加入队列..."}
+          {phase === "idle" || phase === "error" ? t.submit.btnCreate :
+           phase === "hashing" ? t.submit.phaseHashing :
+           phase === "creating" ? t.submit.phaseCreating :
+           phase === "uploading" ? t.submit.phaseUploading :
+           t.submit.phaseQueueing}
         </button>
       </div>
     </section>
@@ -254,7 +270,7 @@ function NumberField({ label, value, setValue, min, max, step }: {
 }) {
   return (
     <label className="block">
-      <span className="text-xs font-medium text-fg-muted">{label}</span>
+      <span className="text-[11px] font-medium text-fg-muted">{label}</span>
       <input
         type="number"
         value={value}
@@ -262,7 +278,7 @@ function NumberField({ label, value, setValue, min, max, step }: {
         max={max}
         step={step}
         onChange={(e) => setValue(Number(e.target.value))}
-        className="mt-1 w-full rounded-btn border border-border bg-bg px-3 py-2 text-sm"
+        className="mt-1 w-full rounded-btn border border-white/[0.08] bg-bg px-2.5 py-2 text-sm outline-none focus:border-brand/60"
       />
     </label>
   );
@@ -283,9 +299,9 @@ function uploadWithProgress(url: string, file: File, onProgress: (pct: number) =
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) resolve();
-      else reject(new Error(`上传失败 (${xhr.status})`));
+      else reject(new Error(`Upload failed (${xhr.status})`));
     };
-    xhr.onerror = () => reject(new Error("上传过程中网络异常"));
+    xhr.onerror = () => reject(new Error("network error during upload"));
     xhr.open("PUT", url);
     xhr.setRequestHeader("content-type", "text/plain");
     xhr.send(file);

@@ -2,11 +2,14 @@ import Link from "next/link";
 import { createServiceRoleClient, getOptionalUser } from "@/lib/supabase/server";
 import { readServerClientId } from "@/lib/server-client-id";
 import { JobsList } from "@/components/JobsList";
+import { getDictionary } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function JobsPage() {
-  const user = await getOptionalUser();
+  const [user, locale] = await Promise.all([getOptionalUser(), getServerLocale()]);
+  const t = getDictionary(locale);
   const clientId = !user ? await readServerClientId() : null;
   const admin = createServiceRoleClient();
 
@@ -19,19 +22,19 @@ export default async function JobsPage() {
   const { data: jobs } = await query;
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-5xl space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">任务记录</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t.jobs.title}</h1>
           <p className="mt-1 text-sm text-fg-muted">
-            {user ? `当前登录：${user.email}` : "匿名任务会绑定到当前浏览器。"}
+            {user ? `${t.jobs.subtitleAuthed}${user.email}` : t.jobs.subtitleAnon}
           </p>
         </div>
-        <Link href="/submit" className="rounded-btn bg-brand px-4 py-2 text-sm font-medium text-brand-fg">
-          新建任务
+        <Link href="/submit" className="btn-primary rounded-btn px-4 py-2 text-sm font-semibold">
+          {t.jobs.newJob}
         </Link>
       </div>
-      <JobsList jobs={jobs ?? []} />
+      <JobsList jobs={jobs ?? []} t={t.jobs} statusLabels={t.status} />
     </div>
   );
 }

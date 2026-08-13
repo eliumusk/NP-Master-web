@@ -1,16 +1,17 @@
 import { getOptionalUser } from "@/lib/supabase/server";
 import { BatchSubmit } from "@/components/BatchSubmit";
+import { getDictionary } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/server";
 
 export default async function SubmitPage() {
-  const user = await getOptionalUser();
+  const [user, locale] = await Promise.all([getOptionalUser(), getServerLocale()]);
+  const t = getDictionary(locale);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-3xl space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold">提交基因组</h1>
-        <p className="mt-1 text-sm text-fg-muted">
-          登录用户可以提交批量 FASTA；匿名模式可提交一个小 FASTA 用于快速测试。
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">{t.submit.pageTitle}</h1>
+        <p className="mt-1 text-sm text-fg-muted">{t.submit.pageSubtitle}</p>
       </div>
       <BatchSubmit isLoggedIn={!!user} />
     </div>
