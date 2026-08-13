@@ -40,13 +40,21 @@ type UploadTicket = {
   gff3UploadUrl?: string | null;
 };
 
+function strictnessTag(value: number, t: ReturnType<typeof useI18n>["t"]) {
+  if (value >= 0.95) return t.submit.tagStrict;
+  if (value >= 0.85) return t.submit.tagStandard;
+  return t.submit.tagLoose;
+}
+
 export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boolean; compact?: boolean }) {
   const router = useRouter();
   const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
+  const gff3InputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<Picked[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
+  const [dragOver, setDragOver] = useState(false);
   const [title, setTitle] = useState<string>(t.submit.defaultTitle);
   const [threshold, setThreshold] = useState(0.95);
   const [extendThreshold, setExtendThreshold] = useState(0.8);
@@ -57,6 +65,7 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
   const maxFiles = isLoggedIn ? AUTH_MAX_FILES : 1;
   const busy = phase !== "idle" && phase !== "error";
   const validFiles = useMemo(() => files.filter((f) => f.ok !== false), [files]);
+  const singleFile = files.length === 1 ? files[0] : null;
 
   async function addFiles(list: FileList | File[]) {
     setError("");
@@ -85,7 +94,8 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
     setFiles((xs) => xs.filter((_, idx) => idx !== i));
   }
 
-  async function attachGff3(i: number, file: File) {
+  async function attachGff3(file: File) {
+    if (!singleFile) return;
     const item: Gff3Picked = { file };
     if (file.size > GFF3_MAX_BYTES) {
       item.ok = false;
@@ -97,11 +107,11 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
         ? `${(file.size / 1024 / 1024).toFixed(2)} MB`
         : t.submit[sniff.reasonKey === "empty" ? "gff3Empty" : "gff3Invalid"];
     }
-    setFiles((xs) => xs.map((x, idx) => (idx === i ? { ...x, gff3: item } : x)));
+    setFiles((xs) => xs.map((x, idx) => (idx === 0 ? { ...x, gff3: item } : x)));
   }
 
-  function removeGff3(i: number) {
-    setFiles((xs) => xs.map((x, idx) => (idx === i ? { ...x, gff3: undefined } : x)));
+  function removeGff3() {
+    setFiles((xs) => xs.map((x, idx) => (idx === 0 ? { ...x, gff3: undefined } : x)));
   }
 
   async function submit() {
@@ -191,7 +201,7 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
 
   return (
     <section className="panel p-5">
-      <div className="space-y-4">
+      <div className="space-y-5">
         {!compact && (
           <label className="block">
             <span className="text-sm font-medium">{t.submit.jobTitle}</span>
@@ -203,114 +213,182 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
           </label>
         )}
 
-        <div
-          onClick={() => inputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            void addFiles(e.dataTransfer.files);
-          }}
-          className="group cursor-pointer rounded-card border border-dashed border-white/[0.14] bg-white/[0.02] p-8 text-center transition hover:border-brand/50 hover:bg-brand/[0.04]"
-        >
-          <input
-            ref={inputRef}
-            type="file"
-            multiple={isLoggedIn}
-            accept=".fa,.fasta,.fna,.txt,text/plain"
-            className="sr-only"
-            onChange={(e) => e.target.files && void addFiles(e.target.files)}
-          />
-          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-btn bg-brand-soft text-brand transition group-hover:bg-brand-softer">
-            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10 14V4m0 0L6 8m4-4l4 4M4 16h12" />
-            </svg>
+        {/* ── ① FASTA ─────────────────────────────────────── */}
+        <div>
+          <div className="mb-2 flex items-baseline gap-2">
+            <span className="font-mono text-xs text-brand">01</span>
+            <span className="text-sm font-semibold">{t.submit.stepFasta}</span>
+            <span className="text-xs text-rose-300">*</span>
           </div>
-          <div className="mt-3 text-sm font-medium">{t.submit.dropMain}</div>
-          <div className="mt-1 text-xs text-fg-subtle">
-            {isLoggedIn ? t.submit.dropAuth : t.submit.dropAnon}
+          <div
+            onClick={() => inputRef.current?.click()}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              void addFiles(e.dataTransfer.files);
+            }}
+            className={`group cursor-pointer rounded-card border border-dashed p-8 text-center transition ${
+              dragOver
+                ? "border-brand/70 bg-brand/[0.07]"
+                : "border-white/[0.14] bg-white/[0.02] hover:border-brand/50 hover:bg-brand/[0.04]"
+            }`}
+          >
+            <input
+              ref={inputRef}
+              type="file"
+              multiple={isLoggedIn}
+              accept=".fa,.fasta,.fna,.txt,text/plain"
+              className="sr-only"
+              onChange={(e) => e.target.files && void addFiles(e.target.files)}
+            />
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-btn bg-brand-soft text-brand transition group-hover:bg-brand-softer">
+              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10 14V4m0 0L6 8m4-4l4 4M4 16h12" />
+              </svg>
+            </div>
+            <div className="mt-3 text-sm font-medium">{t.submit.dropMain}</div>
+            <div className="mt-1 text-xs text-fg-subtle">
+              {isLoggedIn ? t.submit.dropAuth : t.submit.dropAnon}
+            </div>
           </div>
+
+          {files.length > 0 && (
+            <div className="mt-2 space-y-2">
+              {files.map((item, i) => (
+                <div key={`${item.file.name}-${i}`} className="rounded-btn border border-white/[0.06] bg-white/[0.02] p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <input
+                        value={item.genomeName}
+                        onChange={(e) => setFiles((xs) => xs.map((x, idx) => idx === i ? { ...x, genomeName: e.target.value } : x))}
+                        className="w-full rounded-btn border border-white/[0.08] bg-bg px-2 py-1 font-mono text-xs outline-none focus:border-brand/60"
+                      />
+                      <div className={`mt-1.5 text-xs ${item.ok === false ? "text-rose-300" : "text-fg-muted"}`}>
+                        {item.file.name} · {item.message ?? t.submit.waitingCheck}
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => removeAt(i)} className="rounded-btn px-2 py-1 text-xs text-fg-subtle transition hover:bg-elevated hover:text-fg">
+                      {t.submit.remove}
+                    </button>
+                  </div>
+                  {(item.progress ?? 0) > 0 && (
+                    <div className="mt-2 h-1 overflow-hidden rounded-pill bg-white/[0.06]">
+                      <div className="h-full rounded-pill bg-gradient-to-r from-brand/70 to-brand transition-all" style={{ width: `${item.progress ?? 0}%` }} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {files.length > 0 && (
-          <div className="space-y-2">
-            {files.map((item, i) => (
-              <div key={`${item.file.name}-${i}`} className="rounded-btn border border-white/[0.06] bg-white/[0.02] p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <input
-                      value={item.genomeName}
-                      onChange={(e) => setFiles((xs) => xs.map((x, idx) => idx === i ? { ...x, genomeName: e.target.value } : x))}
-                      className="w-full rounded-btn border border-white/[0.08] bg-bg px-2 py-1 font-mono text-xs outline-none focus:border-brand/60"
-                    />
-                    <div className={`mt-1.5 text-xs ${item.ok === false ? "text-rose-300" : "text-fg-muted"}`}>
-                      {item.file.name} · {item.message ?? t.submit.waitingCheck}
-                    </div>
-                    <div className="mt-1.5">
-                      {item.gff3 ? (
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className={item.gff3.ok === false ? "text-rose-300" : "text-fg-muted"}>
-                            GFF3: {item.gff3.file.name} · {item.gff3.message}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => removeGff3(i)}
-                            className="rounded px-1 text-fg-subtle transition hover:text-fg"
-                            aria-label="remove gff3"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ) : (
-                        <label className="inline-flex cursor-pointer items-center gap-1 text-xs text-fg-subtle transition hover:text-brand">
-                          <input
-                            type="file"
-                            accept=".gff,.gff3,text/plain"
-                            className="sr-only"
-                            onChange={(e) => {
-                              const f = e.target.files?.[0];
-                              if (f) void attachGff3(i, f);
-                              e.target.value = "";
-                            }}
-                          />
-                          {t.submit.attachGff3}
-                        </label>
-                      )}
-                    </div>
-                  </div>
-                  <button type="button" onClick={() => removeAt(i)} className="rounded-btn px-2 py-1 text-xs text-fg-subtle transition hover:bg-elevated hover:text-fg">
-                    {t.submit.remove}
-                  </button>
-                </div>
-                {(item.progress ?? 0) > 0 && (
-                  <div className="mt-2 h-1 overflow-hidden rounded-pill bg-white/[0.06]">
-                    <div className="h-full rounded-pill bg-gradient-to-r from-brand/70 to-brand transition-all" style={{ width: `${item.progress ?? 0}%` }} />
-                  </div>
-                )}
-              </div>
-            ))}
+        {/* ── ② GFF3 (optional) ───────────────────────────── */}
+        <div>
+          <div className="mb-2 flex items-baseline gap-2">
+            <span className="font-mono text-xs text-brand">02</span>
+            <span className="text-sm font-semibold">{t.submit.stepGff3}</span>
+            <span className="rounded-pill bg-white/[0.06] px-2 py-0.5 text-[10px] text-fg-muted">{t.submit.optional}</span>
           </div>
-        )}
+          <p className="mb-2 text-xs leading-5 text-fg-muted">{t.submit.gff3Help}</p>
 
-        <details className="group rounded-btn border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
-          <summary className="flex cursor-pointer select-none items-center justify-between text-xs font-medium text-fg-muted transition hover:text-fg">
-            {t.submit.advanced}
-            <span className="text-fg-subtle transition group-open:rotate-90">▸</span>
-          </summary>
-          <div className="mt-3 grid gap-3 pb-1 sm:grid-cols-3">
-            <NumberField label={t.submit.threshold} value={threshold} setValue={setThreshold} min={0.05} max={0.99} step={0.01} />
-            <NumberField label={t.submit.extendThreshold} value={extendThreshold} setValue={setExtendThreshold} min={0.05} max={0.99} step={0.01} />
-            <label className="block">
-              <span className="text-[11px] font-medium text-fg-muted">{t.submit.safeTierMin}</span>
-              <select
-                value={safeTierMin}
-                onChange={(e) => setSafeTierMin(e.target.value)}
-                className="mt-1 w-full rounded-btn border border-white/[0.08] bg-bg px-2.5 py-2 text-sm outline-none focus:border-brand/60"
-              >
-                {["Tier1", "Tier2", "Tier3", "Tier4", "Tier5"].map((tier) => <option key={tier}>{tier}</option>)}
-              </select>
-            </label>
+          {singleFile?.gff3 ? (
+            <div className="flex items-center justify-between gap-3 rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2.5">
+              <div className={`min-w-0 truncate text-xs ${singleFile.gff3.ok === false ? "text-rose-300" : "text-fg-muted"}`}>
+                <span className="font-medium text-fg">GFF3</span> · {singleFile.gff3.file.name} · {singleFile.gff3.message}
+              </div>
+              <button type="button" onClick={removeGff3} className="shrink-0 rounded-btn px-2 py-1 text-xs text-fg-subtle transition hover:bg-elevated hover:text-fg">
+                {t.submit.remove}
+              </button>
+            </div>
+          ) : (
+            <div
+              onClick={() => singleFile && gff3InputRef.current?.click()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const f = e.dataTransfer.files?.[0];
+                if (f) void attachGff3(f);
+              }}
+              className={`rounded-btn border border-dashed px-4 py-4 text-center text-xs transition ${
+                singleFile
+                  ? "cursor-pointer border-white/[0.12] bg-white/[0.015] text-fg-muted hover:border-brand/40 hover:text-fg"
+                  : "cursor-not-allowed border-white/[0.06] text-fg-subtle"
+              }`}
+            >
+              <input
+                ref={gff3InputRef}
+                type="file"
+                accept=".gff,.gff3,text/plain"
+                className="sr-only"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void attachGff3(f);
+                  e.target.value = "";
+                }}
+              />
+              {singleFile ? t.submit.gff3Drop : files.length > 1 ? t.submit.gff3MultiNote : t.submit.gff3NeedFasta}
+            </div>
+          )}
+        </div>
+
+        {/* ── ③ Parameters ────────────────────────────────── */}
+        <div>
+          <div className="mb-2 flex items-baseline gap-2">
+            <span className="font-mono text-xs text-brand">03</span>
+            <span className="text-sm font-semibold">{t.submit.stepParams}</span>
+            <span className="text-[11px] text-fg-subtle">{t.submit.paramsNote}</span>
           </div>
-        </details>
+          <div className="space-y-5 rounded-btn border border-white/[0.06] bg-white/[0.02] p-4">
+            <SliderField
+              label={t.submit.threshold}
+              tag={strictnessTag(threshold, t)}
+              help={t.submit.thresholdHelp}
+              value={threshold}
+              setValue={(v) => {
+                setThreshold(v);
+                if (extendThreshold > v) setExtendThreshold(v);
+              }}
+              min={0.5}
+              max={0.99}
+              step={0.01}
+            />
+            <SliderField
+              label={t.submit.extendThreshold}
+              help={t.submit.extendHelp}
+              value={extendThreshold}
+              setValue={setExtendThreshold}
+              min={0.5}
+              max={threshold}
+              step={0.01}
+            />
+            <div>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-xs font-medium text-fg">{t.submit.safeTierMin}</span>
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-1 rounded-btn border border-white/[0.08] bg-white/[0.02] p-1">
+                {([
+                  { v: "Tier1", label: t.submit.tierStrict },
+                  { v: "Tier2", label: t.submit.tierStandard },
+                  { v: "Tier3", label: t.submit.tierLoose },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.v}
+                    type="button"
+                    onClick={() => setSafeTierMin(opt.v)}
+                    className={`rounded-btn px-2 py-1.5 text-xs font-medium transition ${
+                      safeTierMin === opt.v ? "bg-elevated text-fg" : "text-fg-muted hover:text-fg"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] leading-4 text-fg-subtle">{t.submit.tierHelp}</p>
+            </div>
+          </div>
+        </div>
 
         {isLoggedIn && (
           <label className="flex cursor-pointer items-center gap-2 text-xs text-fg-muted">
@@ -343,8 +421,10 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
   );
 }
 
-function NumberField({ label, value, setValue, min, max, step }: {
+function SliderField({ label, tag, help, value, setValue, min, max, step }: {
   label: string;
+  tag?: string;
+  help: string;
   value: number;
   setValue: (v: number) => void;
   min: number;
@@ -352,18 +432,25 @@ function NumberField({ label, value, setValue, min, max, step }: {
   step: number;
 }) {
   return (
-    <label className="block">
-      <span className="text-[11px] font-medium text-fg-muted">{label}</span>
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-medium text-fg">{label}</span>
+        <span className="flex items-center gap-2">
+          {tag && <span className="rounded-pill bg-brand-soft px-2 py-0.5 text-[10px] font-medium text-brand">{tag}</span>}
+          <span className="numeric-display text-sm font-medium text-fg">{value.toFixed(2)}</span>
+        </span>
+      </div>
       <input
-        type="number"
+        type="range"
         value={value}
         min={min}
         max={max}
         step={step}
         onChange={(e) => setValue(Number(e.target.value))}
-        className="mt-1 w-full rounded-btn border border-white/[0.08] bg-bg px-2.5 py-2 text-sm outline-none focus:border-brand/60"
+        className="mt-2 w-full accent-brand"
       />
-    </label>
+      <p className="mt-1 text-[11px] leading-4 text-fg-subtle">{help}</p>
+    </div>
   );
 }
 

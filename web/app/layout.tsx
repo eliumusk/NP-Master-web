@@ -48,14 +48,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang={locale === "en" ? "en" : "zh-CN"} className={`${inter.variable} ${jbMono.variable} ${notoSC.variable}`}>
       <body className="min-h-screen bg-bg font-sans text-fg antialiased">
         <I18nProvider locale={locale}>
-          <SiteHeader email={user?.email ?? null} />
-          <main className="mx-auto w-full max-w-[92rem] px-5 py-8">{children}</main>
-          <footer className="mx-auto w-full max-w-[92rem] px-5 pb-8 pt-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] pt-5 text-xs text-fg-subtle">
-              <span>{t.footer.methods}</span>
-              <span className="numeric-display">bgcmaster.bio</span>
-            </div>
-          </footer>
+          <div className="flex min-h-screen flex-col">
+            <SiteHeader email={user?.email ?? null} />
+            <main className="mx-auto w-full max-w-[92rem] flex-1 px-5 py-8">{children}</main>
+            <footer className="mx-auto w-full max-w-[92rem] px-5 pb-8 pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] pt-5 text-xs text-fg-subtle">
+                <span>{t.footer.methods}</span>
+                <span className="numeric-display">bgcmaster.bio</span>
+              </div>
+            </footer>
+          </div>
         </I18nProvider>
       </body>
     </html>
