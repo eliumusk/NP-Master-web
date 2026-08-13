@@ -18,6 +18,7 @@ export const JobCreate = z.object({
   minLenBp: z.number().int().min(100).max(1_000_000).default(2000),
   safeTierMin: z.enum(TIER_ORDER).default("Tier2"),
   extendFlankBp: z.number().int().min(0).max(100_000).default(5000),
+  notifyEmail: z.boolean().default(true),
   clientId: z.string().uuid().optional(),
 }).refine((v) => v.extendThreshold <= v.threshold, {
   message: "extendThreshold must be <= threshold",

@@ -88,6 +88,7 @@ export type JobWorkspacePayload = {
   initialRegions: Region[];
   initialArtifacts: SignedJobArtifact[];
   clientIdOverride?: string;
+  isLoggedIn: boolean;
 };
 
 export type RegionFilters = {

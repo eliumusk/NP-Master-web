@@ -52,6 +52,7 @@ export default async function JobPage({
       initialRegions={trimRegionPayload(regions)}
       initialArtifacts={artifacts}
       clientIdOverride={query.client_id}
+      isLoggedIn={!!user}
     />
   );
 }

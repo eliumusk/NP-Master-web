@@ -5,6 +5,7 @@ import { bgcTypeMeta, functionClassMeta, tierClassName, tierLabel } from "../con
 import { formatBp, formatPercent, formatRange, formatScore } from "../format";
 import { countDomains, countFunctionClasses, extendedLength, regionLength } from "../stats";
 import type { CdsFeature, MibigHit, PfamDomain, Region } from "../types";
+import { FeedbackBox } from "./FeedbackBox";
 import { GeneTrack } from "./GeneTrack";
 
 type DomainRow = PfamDomain & {
@@ -12,7 +13,15 @@ type DomainRow = PfamDomain & {
   functionClass?: string;
 };
 
-export function RegionDetail({ region }: { region: Region | null }) {
+export function RegionDetail({
+  region,
+  isLoggedIn = false,
+  jobId,
+}: {
+  region: Region | null;
+  isLoggedIn?: boolean;
+  jobId?: string;
+}) {
   const { t, locale } = useI18n();
 
   if (!region) {
@@ -109,6 +118,16 @@ export function RegionDetail({ region }: { region: Region | null }) {
         <h3 className="text-sm font-semibold">{t.detail.mibigList}</h3>
         <MibigList hits={region.mibig_hits ?? []} />
       </section>
+
+      {jobId && (
+        <section className="panel p-5">
+          <h3 className="text-sm font-semibold">{t.feedback.regionTitle}</h3>
+          <p className="mt-1 text-xs text-fg-muted">{t.feedback.hint}</p>
+          <div className="mt-3">
+            <FeedbackBox jobId={jobId} regionId={region.id} isLoggedIn={isLoggedIn} variant="region" />
+          </div>
+        </section>
+      )}
     </aside>
   );
 }

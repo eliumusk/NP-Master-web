@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useI18n } from "@/lib/i18n/client";
 import type { JobWorkspacePayload, Region, RegionFilters } from "../types";
 import { ALL_FILTER } from "../constants";
 import { filterRegions } from "../stats";
 import { ArtifactDownloads } from "./ArtifactDownloads";
+import { FeedbackBox } from "./FeedbackBox";
 import { JobHeader } from "./JobHeader";
 import { JobOverview } from "./JobOverview";
 import { RegionDetail } from "./RegionDetail";
@@ -18,7 +20,9 @@ export function JobWorkspace({
   initialRegions,
   initialArtifacts,
   clientIdOverride,
+  isLoggedIn,
 }: JobWorkspacePayload) {
+  const { t } = useI18n();
   const [job, setJob] = useState(initialJob);
   const [genomes, setGenomes] = useState(initialGenomes);
   const [regions, setRegions] = useState(initialRegions);
@@ -81,9 +85,19 @@ export function JobWorkspace({
           onSelectRegion={setSelectedRegionId}
         />
         <div className="xl:sticky xl:top-20 xl:max-h-[calc(100vh-6.5rem)] xl:overflow-y-auto xl:pr-1">
-          <RegionDetail region={selectedRegion} />
+          <RegionDetail region={selectedRegion} isLoggedIn={isLoggedIn} jobId={job.id} />
         </div>
       </div>
+
+      {job.status === "done" && (
+        <section className="panel p-5">
+          <h2 className="text-sm font-semibold">{t.feedback.jobTitle}</h2>
+          <p className="mt-1 text-xs text-fg-muted">{t.feedback.hint}</p>
+          <div className="mt-3">
+            <FeedbackBox jobId={job.id} regionId={null} isLoggedIn={isLoggedIn} variant="job" />
+          </div>
+        </section>
+      )}
 
       <ArtifactDownloads artifacts={artifacts} />
     </div>

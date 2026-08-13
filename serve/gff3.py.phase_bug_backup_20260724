@@ -1,0 +1,698 @@
+from __future__ import annotations
+
+import csv
+from collections import defaultdict
+from dataclasses import dataclass
+import re
+from pathlib import Path
+from typing import Any
+from urllib.parse import unquote
+
+from .extended import read_fasta, wrap_fasta
+
+
+@dataclass(frozen=True)
+class CdsRecord:
+    locus_tag: str
+    cds_id: str
+    contig: str
+    start: int  # 0-based, inclusive
+    end: int    # 0-based, exclusive
+    strand: int
+    nt_sequence: str
+    aa_sequence: str
+    length_aa: int
+    product: str
+
+
+def parse_gff3_attrs(raw: str) -> dict[str, str]:
+    attrs: dict[str, str] = {}
+    for part in raw.split(";"):
+        if not part:
+            continue
+        if "=" in part:
+            key, value = part.split("=", 1)
+            attrs[key] = unquote(value)
+        else:
+            attrs[part] = ""
+    return attrs
+
+
+def reverse_complement(seq: str) -> str:
+    return seq.translate(str.maketrans("ACGTNacgtn", "TGCANtgcan"))[::-1].upper()
+
+
+def _clean_protein(aa: str) -> str:
+    aa = aa.strip().replace("*", "X")
+    if aa.endswith("X"):
+        aa = aa[:-1]
+    allowed = set("ABCDEFGHIKLMNPQRSTVWXYZJUO")
+    return "".join(ch if ch in allowed else "X" for ch in aa.upper())
+
+
+def translate_nt(nt: str, *, translation_table: int = 1) -> str:
+    from Bio.Seq import Seq
+
+    nt = nt.upper().replace("U", "T")
+    trim = len(nt) - (len(nt) % 3)
+    if trim <= 0:
+        return ""
+    return _clean_protein(str(Seq(nt[:trim]).translate(table=translation_table, to_stop=False)))
+
+
+def load_gff3_cds(
+    *,
+    fasta_path: Path,
+    gff3_path: Path,
+    translation_table: int = 1,
+    min_aa: int = 30,
+) -> tuple[list[CdsRecord], dict[str, list[CdsRecord]], dict[str, Any]]:
+    """Translate CDS features from a GFF3 using the matching genome FASTA.
+
+    Multi-exon transcripts are grouped by Parent and translated in transcript
+    order. Coordinates in returned records are genomic 0-based half-open.
+    """
+    contigs = read_fasta(fasta_path)
+    transcript_attrs: dict[str, dict[str, str]] = {}
+    cds_parts: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    feature_counts: dict[str, int] = defaultdict(int)
+    source_counts: dict[str, int] = defaultdict(int)
+
+    with open(gff3_path, errors="replace") as handle:
+        for line in handle:
+            if not line.strip() or line.startswith("#"):
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 9:
+                continue
+            seqid, source, ftype, start, end, _score, strand, phase, attrs_raw = parts
+            feature_counts[ftype] += 1
+            source_counts[source] += 1
+            attrs = parse_gff3_attrs(attrs_raw)
+            if ftype in {"mRNA", "transcript"} and attrs.get("ID"):
+                transcript_attrs[attrs["ID"]] = attrs
+            if ftype != "CDS":
+                continue
+            parents = [p for p in attrs.get("Parent", attrs.get("ID", "")).split(",") if p]
+            if not parents:
+                parents = [attrs.get("ID") or f"{seqid}:{start}-{end}:{strand}"]
+            for parent in parents:
+                cds_parts[parent].append({
+                    "id": attrs.get("ID") or parent,
+                    "parent": parent,
+                    "contig": seqid,
+                    "start": int(start) - 1,
+                    "end": int(end),
+                    "strand": strand if strand in {"+", "-"} else "+",
+                    "phase": 0 if phase in {".", ""} else int(phase),
+                })
+
+    records: list[CdsRecord] = []
+    skipped = 0
+    for parent, parts in cds_parts.items():
+        contig_names = {str(p["contig"]) for p in parts}
+        strands = {str(p["strand"]) for p in parts}
+        if len(contig_names) != 1:
+            skipped += 1
+            continue
+        contig = next(iter(contig_names))
+        seq = contigs.get(contig)
+        if not seq:
+            skipped += 1
+            continue
+        strand = "-" if "-" in strands else "+"
+        ordered = sorted(parts, key=lambda p: int(p["start"]), reverse=(strand == "-"))
+        chunks: list[str] = []
+        for part in ordered:
+            frag = seq[int(part["start"]): int(part["end"])]
+            if strand == "-":
+                frag = reverse_complement(frag)
+            phase = int(part.get("phase") or 0)
+            if phase:
+                frag = frag[phase:]
+            chunks.append(frag)
+        nt_seq = "".join(chunks).upper()
+        aa_seq = translate_nt(nt_seq, translation_table=translation_table)
+        if len(aa_seq) < min_aa:
+            skipped += 1
+            continue
+        tattr = transcript_attrs.get(parent, {})
+        product = tattr.get("product") or tattr.get("Name") or "GFF3-predicted protein"
+        if product.lower().startswith("orf type:"):
+            product = "GFF3-predicted protein"
+        records.append(CdsRecord(
+            locus_tag=parent,
+            cds_id=str(parts[0].get("id") or parent),
+            contig=contig,
+            start=min(int(p["start"]) for p in parts),
+            end=max(int(p["end"]) for p in parts),
+            strand=-1 if strand == "-" else 1,
+            nt_sequence=nt_seq,
+            aa_sequence=aa_seq,
+            length_aa=len(aa_seq),
+            product=product,
+        ))
+
+    records.sort(key=lambda r: (r.contig, r.start, r.end, r.locus_tag))
+    by_contig: dict[str, list[CdsRecord]] = defaultdict(list)
+    for record in records:
+        by_contig[record.contig].append(record)
+    stats = {
+        "feature_type_counts": dict(feature_counts),
+        "source_counts": dict(source_counts),
+        "gff_cds_parents": len(cds_parts),
+        "gff_translated_cds": len(records),
+        "gff_skipped_cds": skipped,
+        "gff_contigs_with_cds": len(by_contig),
+    }
+    return records, dict(by_contig), stats
+
+
+def cds_overlapping(by_contig: dict[str, list[CdsRecord]], contig: str, start: int, end: int) -> list[CdsRecord]:
+    return [cds for cds in by_contig.get(contig, []) if cds.start < end and cds.end > start]
+
+
+def write_cds_faa(records: list[CdsRecord], out_faa: Path) -> None:
+    out_faa.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_faa, "w") as handle:
+        for record in records:
+            handle.write(f">{record.locus_tag}\n{wrap_fasta(record.aa_sequence)}\n")
+
+
+def _seed_gene_loci(raw: Any) -> list[str]:
+    return [item.strip() for item in str(raw or "").split(";") if item.strip()]
+
+
+_PEP_HEADER_RE = re.compile(r"(?P<contig>[^:\s|]+):(?P<start>\d+)-(?P<end>\d+)\((?P<strand>[+-])\)")
+
+
+def load_core_peptides(pep_fasta: Path) -> dict[tuple[str, int, int, str], str]:
+    """Load optional externally-corrected core peptides keyed by genomic interval.
+
+    Header examples:
+      >mRNA_pep ptg000007l:712964-714045(+)
+    """
+    peptides: dict[tuple[str, int, int, str], str] = {}
+    if not pep_fasta.exists():
+        return peptides
+    header: str | None = None
+    seq_parts: list[str] = []
+    with open(pep_fasta, errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                if header is not None:
+                    match = _PEP_HEADER_RE.search(header)
+                    if match:
+                        key = (
+                            match.group("contig"),
+                            int(match.group("start")),
+                            int(match.group("end")),
+                            match.group("strand"),
+                        )
+                        peptides[key] = "".join(seq_parts).replace("*", "").strip()
+                header = line[1:]
+                seq_parts = []
+            else:
+                seq_parts.append(line)
+        if header is not None:
+            match = _PEP_HEADER_RE.search(header)
+            if match:
+                key = (
+                    match.group("contig"),
+                    int(match.group("start")),
+                    int(match.group("end")),
+                    match.group("strand"),
+                )
+                peptides[key] = "".join(seq_parts).replace("*", "").strip()
+    return peptides
+
+
+def _seed_fragment_locus_groups(row: dict[str, Any]) -> list[list[str]]:
+    raw_groups = str(row.get("seed_fragment_groups") or "")
+    groups: list[list[str]] = []
+    if raw_groups:
+        for raw_group in raw_groups.split("|"):
+            group = _seed_gene_loci(raw_group)
+            if len(group) >= 2:
+                groups.append(group)
+    if not groups and "core_fragment_merge" in str(row.get("seed_rule") or ""):
+        seed_loci = _seed_gene_loci(row.get("seed_genes"))
+        if len(seed_loci) >= 2:
+            groups.append(seed_loci)
+    return groups
+
+
+def _merged_seed_groups(
+    row: dict[str, Any],
+    by_contig: dict[str, list[CdsRecord]],
+    *,
+    contig: str,
+    start: int,
+    end: int,
+) -> list[list[CdsRecord]]:
+    """Return CDS groups that should be reported as one merged core enzyme."""
+    locus_groups = _seed_fragment_locus_groups(row)
+    if not locus_groups:
+        return []
+    overlapping = cds_overlapping(by_contig, contig, start, end)
+    groups: list[list[CdsRecord]] = []
+    for seed_loci in locus_groups:
+        wanted = set(seed_loci)
+        records = [cds for cds in overlapping if cds.locus_tag in wanted]
+        if len(records) < 2:
+            continue
+        records.sort(key=lambda x: x.start)
+        if len({r.contig for r in records}) != 1 or len({r.strand for r in records}) != 1:
+            continue
+        groups.append(records)
+    return groups
+
+
+def _merged_core_type(row: dict[str, Any]) -> str:
+    label = str(row.get("seed_type") or row.get("type") or row.get("v4_1_type") or "").strip()
+    if label == "NRP":
+        return "NRPS"
+    return label or "BGC"
+
+
+def _merged_core_product(row: dict[str, Any]) -> str:
+    core_type = _merged_core_type(row)
+    if core_type == "Terpene":
+        return "assembly-error-tolerant reconstructed terpene synthase core enzyme"
+    if core_type == "Polyketide":
+        return "assembly-error-tolerant reconstructed polyketide synthase core enzyme"
+    if core_type == "NRPS":
+        return "assembly-error-tolerant reconstructed nonribosomal peptide synthetase core enzyme"
+    return f"assembly-error-tolerant reconstructed {core_type} core enzyme"
+
+
+def _core_enzyme_status(row: dict[str, Any]) -> str:
+    return str(row.get("core_enzyme_status") or "assembly_error_tolerant_reconstructed")
+
+
+def _core_reconstruction_rule(row: dict[str, Any]) -> str:
+    return str(row.get("core_reconstruction_rule") or "adjacent_same_strand_class_aware_fragment_stitch")
+
+
+def _core_reconstruction_note(row: dict[str, Any]) -> str:
+    return str(row.get("core_reconstruction_note") or (
+        "Component CDS fragments are stitched in post-processing to tolerate assembly "
+        "or gene-model breaks; reconstructed candidate, not independently validated."
+    ))
+
+
+def _merged_locus_tag(records: list[CdsRecord]) -> str:
+    return "+".join(record.locus_tag for record in records)
+
+
+def _merged_nt_sequence(records: list[CdsRecord]) -> str:
+    ordered = sorted(records, key=lambda x: x.start, reverse=(records[0].strand == -1))
+    return "".join(record.nt_sequence for record in ordered)
+
+
+def _merged_aa_sequence(records: list[CdsRecord]) -> str:
+    ordered = sorted(records, key=lambda x: x.start, reverse=(records[0].strand == -1))
+    return "".join(record.aa_sequence for record in ordered)
+
+
+def _merged_span(records: list[CdsRecord]) -> tuple[int, int]:
+    return min(record.start for record in records), max(record.end for record in records)
+
+
+def _merged_gap_note(records: list[CdsRecord]) -> str:
+    ordered = sorted(records, key=lambda x: x.start)
+    gaps = []
+    for left, right in zip(ordered, ordered[1:]):
+        gap = max(0, right.start - left.end)
+        if gap:
+            gaps.append(f"{left.end + 1}-{right.start} ({gap} bp)")
+    return "; ".join(gaps)
+
+
+def generate_genbank_from_gff3(
+    *,
+    fasta_path: Path,
+    gff3_path: Path,
+    regions_csv: Path,
+    out_gbk_path: Path,
+    core_pep_fasta: Path | None = None,
+    translation_table: int = 1,
+) -> int:
+    """Build a per-region GenBank using CDS translations from a user GFF3."""
+    from Bio import SeqIO
+    from Bio.Seq import Seq
+    from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature
+    from Bio.SeqRecord import SeqRecord
+
+    contigs = read_fasta(fasta_path)
+    core_peptides = load_core_peptides(core_pep_fasta) if core_pep_fasta else {}
+    _records, by_contig, _stats = load_gff3_cds(
+        fasta_path=fasta_path,
+        gff3_path=gff3_path,
+        translation_table=translation_table,
+    )
+    rows: list[dict[str, Any]] = []
+    with open(regions_csv, newline="") as handle:
+        for i, row in enumerate(csv.DictReader(handle), start=1):
+            rows.append({
+                "name": row.get("bgc_id") or f"BGC_{i:04d}",
+                "contig": row["contig"],
+                "start": int(row["start"]),
+                "end": int(row["end"]),
+                "score": float(row.get("score") or 0.0),
+                "type": (row.get("v4_1_type") or row.get("seed_type") or row.get("type") or "Other") or "Other",
+                "type_score": row.get("v4_1_type_score") or "",
+                "proposal_source": row.get("proposal_source") or "",
+                "seed_type": row.get("seed_type") or "",
+                "seed_rule": row.get("seed_rule") or "",
+                "seed_genes": row.get("seed_genes") or "",
+                "seed_fragment_groups": row.get("seed_fragment_groups") or "",
+                "seed_core_start": row.get("seed_core_start") or "",
+                "seed_core_end": row.get("seed_core_end") or "",
+                "core_enzyme_id": row.get("core_enzyme_id") or "",
+                "core_enzyme_status": row.get("core_enzyme_status") or "",
+                "core_enzyme_component_cds": row.get("core_enzyme_component_cds") or "",
+                "core_fragment_count": row.get("core_fragment_count") or "",
+                "core_reconstruction_rule": row.get("core_reconstruction_rule") or "",
+                "core_reconstruction_note": row.get("core_reconstruction_note") or "",
+            })
+
+    out_gbk_path.parent.mkdir(parents=True, exist_ok=True)
+    out_records: list[SeqRecord] = []
+    for row in rows:
+        seq = contigs.get(str(row["contig"]), "")
+        sub = seq[int(row["start"]): int(row["end"])]
+        if not sub:
+            continue
+        rec = SeqRecord(
+            Seq(sub),
+            id=str(row["name"]),
+            name=str(row["name"])[:16],
+            description=(
+                f"BGC region; type={row['type']}; score={row['score']:.3f}; "
+                f"source={row['contig']}:{row['start']}-{row['end']}; CDS_source=GFF3"
+            ),
+            annotations={
+                "molecule_type": "DNA",
+                "organism": "predicted by BGC_Master with user GFF3",
+                "topology": "linear",
+                "date": "01-JAN-2026",
+            },
+        )
+        source_quals: dict[str, list[str]] = {
+            "organism": ["predicted by BGC_Master with user GFF3"],
+            "source_contig": [str(row["contig"])],
+            "source_start": [str(row["start"])],
+            "source_end": [str(row["end"])],
+            "bgc_type": [str(row["type"])],
+            "bgc_score": [f"{row['score']:.4f}"],
+            "cds_source": [gff3_path.name],
+        }
+        if row["type_score"]:
+            source_quals["bgc_type_score"] = [str(row["type_score"])]
+        if row["proposal_source"]:
+            source_quals["proposal_source"] = [str(row["proposal_source"])]
+        if row["seed_rule"]:
+            source_quals["seed_rule"] = [str(row["seed_rule"])]
+        rec.features.append(SeqFeature(FeatureLocation(0, len(sub)), type="source", qualifiers=source_quals))
+
+        merged_groups = _merged_seed_groups(
+            row,
+            by_contig,
+            contig=str(row["contig"]),
+            start=int(row["start"]),
+            end=int(row["end"]),
+        )
+        skip_loci = {record.locus_tag for group in merged_groups for record in group}
+        for group in merged_groups:
+            group_start, group_end = _merged_span(group)
+            parts = []
+            for cds in sorted(group, key=lambda x: x.start):
+                rel_start = max(0, cds.start - int(row["start"]))
+                rel_end = min(len(sub), cds.end - int(row["start"]))
+                if rel_end > rel_start:
+                    parts.append(FeatureLocation(rel_start, rel_end, strand=cds.strand))
+            if not parts:
+                continue
+            location = CompoundLocation(parts, operator="join") if len(parts) > 1 else parts[0]
+            gap_note = _merged_gap_note(group)
+            core_type = _merged_core_type(row)
+            pep_key = (
+                str(row["contig"]),
+                group_start + 1,
+                group_end,
+                "+" if group[0].strand == 1 else "-",
+            )
+            pep_seq = core_peptides.get(pep_key, "")
+            pep_translation = pep_seq or _merged_aa_sequence(group)
+            notes = [
+                f"assembly-error-tolerant {core_type} core enzyme reconstructed from component CDS "
+                f"{','.join(c.locus_tag for c in group)}; "
+                f"genomic span {group[0].contig}:{group_start + 1}-{group_end}"
+            ]
+            if gap_note:
+                notes.append(f"component gap(s) crossed by post-processing stitch: {gap_note}")
+            if pep_seq:
+                notes.append("translation overridden by external peptide evidence for the same genomic interval")
+            notes.append(_core_reconstruction_note(row))
+            rec.features.append(SeqFeature(
+                location,
+                type="CDS",
+                qualifiers={
+                    "locus_tag": [_merged_locus_tag(group)],
+                    "product": [_merged_core_product(row)],
+                    "note": notes,
+                    "inference": [f"BGC-Master post-processing:{_core_reconstruction_rule(row)}"],
+                    "translation": [pep_translation],
+                    "codon_start": ["1"],
+                },
+            ))
+
+        for cds in cds_overlapping(by_contig, str(row["contig"]), int(row["start"]), int(row["end"])):
+            if cds.locus_tag in skip_loci:
+                continue
+            rel_start = max(0, cds.start - int(row["start"]))
+            rel_end = min(len(sub), cds.end - int(row["start"]))
+            if rel_end <= rel_start:
+                continue
+            rec.features.append(SeqFeature(
+                FeatureLocation(rel_start, rel_end, strand=cds.strand),
+                type="CDS",
+                qualifiers={
+                    "locus_tag": [cds.locus_tag],
+                    "product": [cds.product],
+                    "note": [
+                        f"GFF3 CDS {cds.contig}:{cds.start + 1}-{cds.end} "
+                        f"({'+' if cds.strand == 1 else '-'}); full protein used for annotation"
+                    ],
+                    "translation": [cds.aa_sequence],
+                    "codon_start": ["1"],
+                },
+            ))
+        out_records.append(rec)
+
+    with open(out_gbk_path, "w") as handle:
+        SeqIO.write(out_records, handle, "genbank")
+    return len(out_records)
+
+
+def write_extended_outputs_from_gff3(
+    *,
+    fasta_path: Path,
+    gff3_path: Path,
+    rows: list[dict[str, Any]],
+    out_dir: Path,
+    genome_name: str,
+    flank_bp: int,
+    core_pep_fasta: Path | None = None,
+    translation_table: int = 1,
+) -> dict[str, Path]:
+    contigs = read_fasta(fasta_path)
+    core_peptides = load_core_peptides(core_pep_fasta) if core_pep_fasta else {}
+    _records, by_contig, _stats = load_gff3_cds(
+        fasta_path=fasta_path,
+        gff3_path=gff3_path,
+        translation_table=translation_table,
+    )
+    contig_lens = {name: len(seq) for name, seq in contigs.items()}
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for row in rows:
+        contig = str(row["contig"])
+        start = int(row["start"])
+        end = int(row["end"])
+        row["ext_start"] = max(0, start - flank_bp)
+        row["ext_end"] = min(contig_lens.get(contig, end + flank_bp), end + flank_bp)
+
+    regions_fna = out_dir / "extended_regions.fna"
+    cds_faa = out_dir / "extended_cds.faa"
+    cds_fna = out_dir / "extended_cds.fna"
+    cds_csv = out_dir / "extended_cds.csv"
+    core_faa = out_dir / "reconstructed_core_enzymes.faa"
+    core_fna = out_dir / "reconstructed_core_enzymes.fna"
+    core_csv = out_dir / "reconstructed_core_enzymes.csv"
+    safe_rows = [row for row in rows if bool(row.get("safe_pass"))]
+
+    with open(regions_fna, "w") as handle:
+        for row in safe_rows:
+            seq = contigs.get(str(row["contig"]), "")
+            ext_start = int(row["ext_start"])
+            ext_end = int(row["ext_end"])
+            subseq = seq[ext_start:ext_end]
+            if not subseq:
+                continue
+            label = row.get("safe_type_label") or row.get("v4_1_type") or "BGC"
+            source = row.get("proposal_source") or "model"
+            handle.write(
+                f">{genome_name}|{row['contig']}|{row['bgc_id']}|{ext_start}-{ext_end}|{label}|{source}|CDS_source=GFF3\n"
+                f"{wrap_fasta(subseq)}\n"
+            )
+
+    cds_rows: list[dict[str, Any]] = []
+    core_rows: list[dict[str, Any]] = []
+    with (
+        open(cds_faa, "w") as faa_out,
+        open(cds_fna, "w") as fna_out,
+        open(core_faa, "w") as core_faa_out,
+        open(core_fna, "w") as core_fna_out,
+    ):
+        for row in safe_rows:
+            contig = str(row["contig"])
+            ext_start = int(row["ext_start"])
+            ext_end = int(row["ext_end"])
+            merged_groups = _merged_seed_groups(row, by_contig, contig=contig, start=ext_start, end=ext_end)
+            skip_loci = {record.locus_tag for group in merged_groups for record in group}
+            for group in merged_groups:
+                strand = "+" if group[0].strand == 1 else "-"
+                group_start, group_end = _merged_span(group)
+                locus_tag = _merged_locus_tag(group)
+                pep_key = (contig, group_start + 1, group_end, strand)
+                aa_seq = core_peptides.get(pep_key, "")
+                translation_source = "external_peptide_interval_match" if aa_seq else "component_CDS_stitch"
+                if not aa_seq:
+                    aa_seq = _merged_aa_sequence(group)
+                nt_seq = _merged_nt_sequence(group)
+                gap_note = _merged_gap_note(group)
+                core_type = _merged_core_type(row)
+                header = (
+                    f"{genome_name}|{contig}|{row['bgc_id']}|{locus_tag}|"
+                    f"{group_start}-{group_end}{strand}|GFF3|assembly_error_tolerant_core_enzyme"
+                )
+                faa_out.write(f">{header}\n{wrap_fasta(aa_seq)}\n")
+                fna_out.write(f">{header}\n{wrap_fasta(nt_seq)}\n")
+                core_faa_out.write(f">{header}|components={';'.join(cds.locus_tag for cds in group)}\n{wrap_fasta(aa_seq)}\n")
+                core_fna_out.write(f">{header}|components={';'.join(cds.locus_tag for cds in group)}\n{wrap_fasta(nt_seq)}\n")
+                core_row = {
+                    "genome": genome_name,
+                    "contig": contig,
+                    "bgc_id": row["bgc_id"],
+                    "bgc_type": row.get("v4_1_type") or "",
+                    "safe_type_label": row.get("safe_type_label") or "",
+                    "proposal_source": row.get("proposal_source") or "",
+                    "core_enzyme_id": locus_tag,
+                    "core_enzyme_status": _core_enzyme_status(row),
+                    "core_type": core_type,
+                    "core_start": group_start,
+                    "core_end": group_end,
+                    "strand": strand,
+                    "length_aa": len(aa_seq),
+                    "component_cds": ";".join(cds.locus_tag for cds in group),
+                    "component_count": len(group),
+                    "translation_source": translation_source,
+                    "reconstruction_rule": _core_reconstruction_rule(row),
+                    "fragment_gap_note": gap_note,
+                    "product": _merged_core_product(row),
+                    "reconstruction_note": _core_reconstruction_note(row),
+                    "aa_sequence": aa_seq,
+                    "nt_sequence": nt_seq,
+                }
+                core_rows.append(core_row)
+                cds_rows.append({
+                    "genome": genome_name,
+                    "contig": contig,
+                    "bgc_id": row["bgc_id"],
+                    "bgc_type": row.get("v4_1_type") or "",
+                    "safe_type_label": row.get("safe_type_label") or "",
+                    "proposal_source": row.get("proposal_source") or "",
+                    "region_ext_start": ext_start,
+                    "region_ext_end": ext_end,
+                    "locus_tag": locus_tag,
+                    "cds_start": group_start,
+                    "cds_end": group_end,
+                    "strand": strand,
+                    "length_aa": len(aa_seq),
+                    "product": _merged_core_product(row),
+                    "core_enzyme_status": _core_enzyme_status(row),
+                    "translation_source": translation_source,
+                    "merged_core_type": core_type,
+                    "merged_fragments": ";".join(cds.locus_tag for cds in group),
+                    "fragment_gap_note": gap_note,
+                    "aa_sequence": aa_seq,
+                    "nt_sequence": nt_seq,
+                })
+            for cds in cds_overlapping(by_contig, contig, ext_start, ext_end):
+                if cds.locus_tag in skip_loci:
+                    continue
+                strand = "+" if cds.strand == 1 else "-"
+                header = f"{genome_name}|{contig}|{row['bgc_id']}|{cds.locus_tag}|{cds.start}-{cds.end}{strand}|GFF3"
+                faa_out.write(f">{header}\n{wrap_fasta(cds.aa_sequence)}\n")
+                fna_out.write(f">{header}\n{wrap_fasta(cds.nt_sequence)}\n")
+                cds_rows.append({
+                    "genome": genome_name,
+                    "contig": contig,
+                    "bgc_id": row["bgc_id"],
+                    "bgc_type": row.get("v4_1_type") or "",
+                    "safe_type_label": row.get("safe_type_label") or "",
+                    "proposal_source": row.get("proposal_source") or "",
+                    "region_ext_start": ext_start,
+                    "region_ext_end": ext_end,
+                    "locus_tag": cds.locus_tag,
+                    "cds_start": cds.start,
+                    "cds_end": cds.end,
+                    "strand": strand,
+                    "length_aa": cds.length_aa,
+                    "product": cds.product,
+                    "core_enzyme_status": "",
+                    "translation_source": "GFF3_CDS",
+                    "merged_core_type": "",
+                    "merged_fragments": "",
+                    "fragment_gap_note": "",
+                    "aa_sequence": cds.aa_sequence,
+                    "nt_sequence": cds.nt_sequence,
+                })
+
+    fieldnames = [
+        "genome", "contig", "bgc_id", "bgc_type", "safe_type_label", "proposal_source",
+        "region_ext_start", "region_ext_end", "locus_tag", "cds_start", "cds_end", "strand",
+        "length_aa", "product", "core_enzyme_status", "translation_source",
+        "merged_core_type", "merged_fragments", "fragment_gap_note", "aa_sequence", "nt_sequence",
+    ]
+    with open(cds_csv, "w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(cds_rows)
+
+    core_fieldnames = [
+        "genome", "contig", "bgc_id", "bgc_type", "safe_type_label", "proposal_source",
+        "core_enzyme_id", "core_enzyme_status", "core_type", "core_start", "core_end", "strand",
+        "length_aa", "component_cds", "component_count", "translation_source",
+        "reconstruction_rule", "fragment_gap_note", "product", "reconstruction_note",
+        "aa_sequence", "nt_sequence",
+    ]
+    with open(core_csv, "w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=core_fieldnames)
+        writer.writeheader()
+        writer.writerows(core_rows)
+
+    return {
+        "extended_regions_fna": regions_fna,
+        "extended_cds_faa": cds_faa,
+        "extended_cds_fna": cds_fna,
+        "extended_cds_csv": cds_csv,
+        "reconstructed_core_enzymes_faa": core_faa,
+        "reconstructed_core_enzymes_fna": core_fna,
+        "reconstructed_core_enzymes_csv": core_csv,
+    }

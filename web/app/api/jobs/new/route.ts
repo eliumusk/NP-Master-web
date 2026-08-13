@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
       min_len_bp: input.minLenBp,
       safe_tier_min: input.safeTierMin,
       extend_flank_bp: input.extendFlankBp,
+      notify_email: user ? input.notifyEmail : false,
       log_tail: "等待 FASTA 上传",
     })
     .select("id")

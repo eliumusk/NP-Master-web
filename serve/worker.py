@@ -12,6 +12,7 @@ import traceback
 
 from .client import claim_next_job, heartbeat, make_client, update_job
 from .config import get_settings
+from .notify import notify_job_finished
 from .pipeline import GpuBusyTimeout, PipelineError, run_job
 
 log = logging.getLogger(__name__)
@@ -66,9 +67,14 @@ def _process_one_job(supa, settings, job: dict) -> None:
         }
         update_job(supa, job_id, **update_fields)
         log.info("job %s done (%d regions, %d safe pass)", job_id, result["n_regions"], result["n_safe"])
+        notify_job_finished(
+            supa, settings, job, ok=True,
+            detail=f"{result['n_regions']} 个候选区域 / regions，{result['n_safe']} 个安全通过 / safe pass",
+        )
     except GpuBusyTimeout as e:
         update_job(supa, job_id, status="failed", finished_at="now()", error=f"GPU 等待超时：{e}")
         log.warning("job %s aborted: %s", job_id, e)
+        notify_job_finished(supa, settings, job, ok=False, detail=str(e))
     except PipelineError as e:
         tb = traceback.format_exc()
         update_job(
@@ -80,6 +86,7 @@ def _process_one_job(supa, settings, job: dict) -> None:
             log_tail=tb[-2000:],
         )
         log.error("job %s pipeline failed: %s", job_id, e)
+        notify_job_finished(supa, settings, job, ok=False, detail=str(e))
     except Exception as e:
         tb = traceback.format_exc()
         update_job(
@@ -91,6 +98,7 @@ def _process_one_job(supa, settings, job: dict) -> None:
             log_tail=tb[-2000:],
         )
         log.exception("job %s unexpected failure", job_id)
+        notify_job_finished(supa, settings, job, ok=False, detail=f"unexpected: {e}")
     finally:
         hb.stop()
         hb.join(timeout=5)

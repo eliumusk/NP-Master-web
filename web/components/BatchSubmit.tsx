@@ -40,6 +40,7 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
   const [threshold, setThreshold] = useState(0.95);
   const [extendThreshold, setExtendThreshold] = useState(0.8);
   const [safeTierMin, setSafeTierMin] = useState("Tier2");
+  const [notifyEmail, setNotifyEmail] = useState(true);
 
   const maxBytes = isLoggedIn ? AUTH_MAX_BYTES : ANON_MAX_BYTES;
   const maxFiles = isLoggedIn ? AUTH_MAX_FILES : 1;
@@ -109,6 +110,7 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
           minLenBp: 2000,
           safeTierMin,
           extendFlankBp: 5000,
+          notifyEmail,
           clientId,
           genomes: hashed.map((item) => ({
             filename: item.file.name,
@@ -240,6 +242,18 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
             </label>
           </div>
         </details>
+
+        {isLoggedIn && (
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-fg-muted">
+            <input
+              type="checkbox"
+              checked={notifyEmail}
+              onChange={(e) => setNotifyEmail(e.target.checked)}
+              className="h-3.5 w-3.5 accent-brand"
+            />
+            {t.submit.notifyEmail}
+          </label>
+        )}
 
         {error && <div className="rounded-card border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-200">{error}</div>}
 
