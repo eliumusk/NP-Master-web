@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { cache } from "react";
 
 type CookieToSet = { name: string; value: string; options?: CookieOptions };
 
@@ -15,7 +16,9 @@ export function hasPublicSupabaseConfig() {
   return !!url && !!key && !url.includes("YOUR-PROJECT") && key !== "ey..." && key.length > 20;
 }
 
-export async function getOptionalUser() {
+// Deduped per request: layout and page both call this, so without cache()
+// each render pass would hit the Supabase Auth API more than once.
+export const getOptionalUser = cache(async () => {
   if (!hasPublicSupabaseConfig()) return null;
   try {
     const supabase = await createClient();
@@ -24,7 +27,7 @@ export async function getOptionalUser() {
   } catch {
     return null;
   }
-}
+});
 
 export async function createClient() {
   const cookieStore = await cookies();
