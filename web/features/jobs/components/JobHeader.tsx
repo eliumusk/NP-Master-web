@@ -14,7 +14,7 @@ export function JobHeader({ job }: { job: JobSummary }) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <h1 className="min-w-0 text-2xl font-semibold tracking-tight">{job.title}</h1>
         <JobStatusBadge status={job.status} labels={t.status} />
-        <span className="font-mono text-xs text-fg-subtle">#{job.id.slice(0, 8)}</span>
+        <span className="font-mono text-xs text-fg-subtle">{job.id.slice(0, 8)}</span>
       </div>
 
       <div className="panel px-5 py-4">
@@ -33,16 +33,26 @@ export function JobHeader({ job }: { job: JobSummary }) {
       </div>
 
       {job.error && (
-        <div className="rounded-card border border-rose-400/30 bg-rose-400/10 p-4">
-          <pre className="whitespace-pre-wrap text-xs text-rose-200">{job.error}</pre>
+        <div className="rounded-card border border-danger/30 bg-danger/10 p-4">
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-danger">{job.error}</pre>
         </div>
       )}
 
       {job.log_tail && (
         <details className="panel group p-4">
-          <summary className="cursor-pointer select-none text-xs font-medium text-fg-muted transition hover:text-fg">
+          <summary className="cursor-pointer select-none text-xs font-medium text-fg-muted transition-colors duration-150 hover:text-fg">
             {t.workspace.runLog}
-            <span className="ml-2 inline-block text-fg-subtle transition group-open:rotate-90">▸</span>
+            <svg
+              className="ml-2 inline-block h-3.5 w-3.5 text-fg-subtle transition-transform duration-150 group-open:rotate-90"
+              viewBox="0 0 20 20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M7 5l5 5-5 5" />
+            </svg>
           </summary>
           <pre className="mt-3 whitespace-pre-wrap font-mono text-xs leading-5 text-fg-muted">{job.log_tail}</pre>
         </details>
@@ -54,8 +64,8 @@ export function JobHeader({ job }: { job: JobSummary }) {
 function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 bg-surface px-4 py-3">
-      <div className="text-[11px] text-fg-subtle">{label}</div>
-      <div className="numeric-display mt-1 truncate text-[13px] font-medium text-fg">{value}</div>
+      <div className="text-micro text-fg-subtle">{label}</div>
+      <div className="numeric-display mt-1 truncate text-small font-medium text-fg">{value}</div>
     </div>
   );
 }

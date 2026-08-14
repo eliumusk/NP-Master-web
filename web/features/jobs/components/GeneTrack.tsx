@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n/client";
-import { functionClassColor, functionClassMeta } from "../constants";
+import { functionClassMeta } from "../constants";
 import { formatBp } from "../format";
 import type { CdsFeature, Region } from "../types";
 
@@ -10,11 +10,11 @@ import type { CdsFeature, Region } from "../types";
 // colours with darker rims, gene labels when space allows, adaptive ruler.
 // Laid out in real pixels (ResizeObserver) so text and strokes stay crisp.
 
-const H = 148;
+const H = 128;
 const LANE_Y = 56;      // centre of the gene lane
 const GENE_H = 18;
 const HEAD = 7;         // arrowhead px
-const RULER_Y = 116;
+const RULER_Y = 96;
 const PAD = 10;
 
 export function GeneTrack({ region }: { region: Region }) {
@@ -48,14 +48,14 @@ export function GeneTrack({ region }: { region: Region }) {
   const innerW = Math.max(0, width - PAD * 2);
   const x = (bp: number) => PAD + ((bp - minBp) / span) * innerW;
 
-  const classesPresent = Array.from(new Set(cdsList.map((c) => c.function_class || "other")));
+  const hasBiosynthetic = cdsList.some((c) => (c.function_class || "").includes("biosynthetic"));
   const ticks = width > 0 ? rulerTicks(minBp, maxBp, innerW) : [];
 
   return (
     <div className="mt-3">
       <div
         ref={wrapRef}
-        className="overflow-hidden rounded-btn border border-white/[0.08] bg-[#070b13] px-0 pt-1"
+        className="overflow-hidden rounded-btn border border-white/[0.08] bg-bg px-0 pt-1"
       >
         {width > 0 && (
           <svg width={width} height={H} className="block" role="img" aria-label="gene map">
@@ -79,7 +79,7 @@ export function GeneTrack({ region }: { region: Region }) {
               fill="rgb(var(--brand))"
               fillOpacity={0.1}
               stroke="rgb(var(--brand))"
-              strokeOpacity={0.55}
+              strokeOpacity={0.35}
               strokeDasharray="4 3"
               rx={3}
             />
@@ -108,7 +108,7 @@ export function GeneTrack({ region }: { region: Region }) {
                     x={tick.px}
                     y={RULER_Y + 15}
                     textAnchor={anchor}
-                    fontSize="9.5"
+                    fontSize="10"
                     fill="rgb(var(--fg-subtle))"
                     fontFamily="var(--font-mono)"
                   >
@@ -121,19 +121,19 @@ export function GeneTrack({ region }: { region: Region }) {
         )}
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-fg-muted">
-        {classesPresent.map((fc) => (
-          <span key={fc} className="inline-flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-[2px]" style={{ backgroundColor: functionClassColor(fc) }} />
-            {functionClassMeta(fc, locale).label}
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-micro text-fg-muted">
+        {hasBiosynthetic && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-[2px] bg-brand/30 ring-1 ring-inset ring-brand/60" />
+            {t.detail.legendBiosynth}
           </span>
-        ))}
+        )}
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-[2px] border border-fg-subtle/60 bg-transparent" />
+          <span className="inline-block h-2.5 w-2.5 rounded-[2px] border border-white/40 bg-white/35" />
           {t.detail.pfamDomain}
         </span>
         <span className="ml-auto font-mono text-fg-subtle">
-          {t.detail.corePrefix} 0 – {formatBp(coreLen)}{extStart != null ? ` · ${t.detail.metaExt} ${formatBp(extStart)} – ${formatBp(extEnd ?? 0)}` : ""}
+          {t.detail.corePrefix} 0–{formatBp(coreLen)}{extStart != null && extStart < 0 ? ` · ${t.detail.metaExt} ${formatBp(-extStart)}` : ""}
         </span>
       </div>
     </div>
@@ -158,8 +158,10 @@ function GeneArrow({
   const x2 = x(end);
   const w = Math.max(2, x2 - x1);
   const fc = cds.function_class || "other";
-  const color = functionClassColor(fc);
-  const rim = darken(color, 0.32);
+  // Muted track: one quiet gray for all genes, brand teal only for
+  // biosynthetic (synthase) genes — the point of a BGC region view.
+  const biosynthetic = fc.includes("biosynthetic");
+  const fill = biosynthetic ? "rgb(var(--brand))" : "rgb(var(--fg))";
 
   const y = LANE_Y - GENE_H / 2;
   const head = Math.min(HEAD, w * 0.4);
@@ -182,7 +184,7 @@ function GeneArrow({
 
   return (
     <g className="cursor-default transition-opacity hover:opacity-85">
-      <polygon points={pts} fill={color} stroke={rim} strokeWidth={1}>
+      <polygon points={pts} fill={fill} fillOpacity={biosynthetic ? 0.3 : 0.1} stroke={fill} strokeOpacity={biosynthetic ? 0.7 : 0.3} strokeWidth={1}>
         <title>{`${label || "CDS"} · ${cds.product || hypothetical}\n${start}–${end} bp (${strand < 0 ? "−" : "+"}) · ${functionClassMeta(fc, locale).label}`}</title>
       </polygon>
       {/* pfam domains: subtle light insets centred on the arrow body */}
@@ -200,8 +202,6 @@ function GeneArrow({
             height={6}
             fill="#ffffff"
             fillOpacity={0.35}
-            stroke={rim}
-            strokeWidth={0.5}
           >
             <title>{`${d.name ?? "Pfam"} ${d.accession ?? ""}${d.bitscore != null ? ` · bits ${Number(d.bitscore).toFixed(1)}` : ""}`}</title>
           </rect>
@@ -224,14 +224,6 @@ function GeneArrow({
   );
 }
 
-function darken(hex: string, amount: number) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = Math.round(((n >> 16) & 255) * (1 - amount));
-  const g = Math.round(((n >> 8) & 255) * (1 - amount));
-  const b = Math.round((n & 255) * (1 - amount));
-  return `rgb(${r},${g},${b})`;
-}
-
 function truncateToWidth(label: string, w: number) {
   const maxChars = Math.floor(w / 6.5);
   if (label.length <= maxChars) return label;
@@ -245,7 +237,8 @@ function rulerTicks(minBp: number, maxBp: number, innerW: number) {
   const rawStep = span / target;
   const pow = Math.pow(10, Math.floor(Math.log10(rawStep)));
   const step = [1, 2, 5, 10].map((m) => m * pow).find((s) => s >= rawStep) ?? 10 * pow;
-  const first = Math.ceil(minBp / step) * step;
+  // `|| 0` normalizes -0 so the ruler never renders "-0 bp"
+  const first = Math.ceil(minBp / step) * step || 0;
   const ticks: Array<{ bp: number; px: number; label: string }> = [];
   for (let bp = first; bp <= maxBp; bp += step) {
     ticks.push({ bp, px: 0, label: formatBp(bp) });

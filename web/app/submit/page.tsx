@@ -8,7 +8,7 @@ export default async function SubmitPage() {
   const t = getDictionary(locale);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
+    <div className="mx-auto w-full max-w-3xl space-y-5 px-5 sm:px-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{t.submit.pageTitle}</h1>
         <p className="mt-1 text-sm text-fg-muted">{t.submit.pageSubtitle}</p>

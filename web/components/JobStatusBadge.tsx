@@ -1,12 +1,12 @@
 import type { Dictionary } from "@/lib/i18n";
 
 const STYLES: Record<string, string> = {
-  awaiting_upload: "bg-brand-soft text-brand ring-1 ring-inset ring-brand/30",
-  queued: "bg-bgc-other/15 text-bgc-other ring-1 ring-inset ring-bgc-other/30",
-  running: "bg-bgc-nrp/15 text-bgc-nrp ring-1 ring-inset ring-bgc-nrp/30",
-  done: "bg-bgc-terpene/15 text-bgc-terpene ring-1 ring-inset ring-bgc-terpene/30",
-  failed: "bg-bgc-alkaloid/15 text-bgc-alkaloid ring-1 ring-inset ring-bgc-alkaloid/30",
-  canceled: "bg-bgc-ripp/15 text-bgc-ripp ring-1 ring-inset ring-bgc-ripp/30",
+  awaiting_upload: "bg-white/[0.06] text-fg-muted ring-1 ring-inset ring-white/[0.08]",
+  queued: "bg-white/[0.06] text-fg-muted ring-1 ring-inset ring-white/[0.08]",
+  canceled: "bg-white/[0.06] text-fg-muted ring-1 ring-inset ring-white/[0.08]",
+  running: "bg-brand-soft text-brand ring-1 ring-inset ring-brand/30",
+  done: "bg-success/15 text-success ring-1 ring-inset ring-success/30",
+  failed: "bg-danger/15 text-danger ring-1 ring-inset ring-danger/30",
 };
 
 const FALLBACK: keyof Dictionary["status"] = "queued";

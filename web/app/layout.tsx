@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import { Noto_Sans_SC } from "next/font/google";
 import { getOptionalUser } from "@/lib/supabase/server";
 import { SiteHeader } from "@/components/SiteHeader";
+import { SiteFooter } from "@/components/SiteFooter";
 import { I18nProvider } from "@/lib/i18n/client";
 import { getDictionary } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/server";
@@ -50,13 +51,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <I18nProvider locale={locale}>
           <div className="flex min-h-screen flex-col">
             <SiteHeader email={user?.email ?? null} />
-            <main className="mx-auto w-full max-w-[92rem] flex-1 px-5 py-8">{children}</main>
-            <footer className="mx-auto w-full max-w-[92rem] px-5 pb-8 pt-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] pt-5 text-xs text-fg-subtle">
-                <span>{t.footer.methods}</span>
-                <span className="numeric-display">bgcmaster.bio</span>
-              </div>
-            </footer>
+            <main className="w-full flex-1">{children}</main>
+            <SiteFooter methods={t.footer.methods} />
           </div>
         </I18nProvider>
       </body>

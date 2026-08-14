@@ -90,19 +90,19 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="mx-auto max-w-md space-y-6">
+    <div className="mx-auto w-full max-w-md space-y-6 px-5 sm:px-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{t.auth.title}</h1>
+        <h1 className="text-2xl font-semibold">{t.auth.title}</h1>
         <p className="mt-1 text-sm text-fg-muted">{t.auth.subtitle}</p>
       </div>
 
-      <div className="flex gap-1 rounded-btn border border-white/[0.08] bg-white/[0.02] p-1 text-sm">
+      <div className="flex rounded-btn border border-white/[0.08] bg-white/[0.02] p-0.5 text-caption font-medium">
         {modes.map((m) => (
           <button
             key={m.key}
             type="button"
             onClick={() => { setMode(m.key); setMessage(""); }}
-            className={`flex-1 rounded-btn px-3 py-1.5 transition ${
+            className={`flex-1 rounded-[6px] px-3 py-1.5 transition-colors duration-150 ${
               mode === m.key ? "bg-elevated text-fg" : "text-fg-muted hover:text-fg"
             }`}
           >
@@ -119,7 +119,7 @@ export default function LoginPage() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1.5 w-full rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-sm outline-none transition focus:border-brand/60"
+            className="mt-1.5 w-full rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-sm outline-none transition-colors duration-150 hover:border-white/[0.16] focus:border-brand/60 focus:ring-4 focus:ring-brand/10"
             autoComplete="email"
           />
         </label>
@@ -134,7 +134,7 @@ export default function LoginPage() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1.5 w-full rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-sm outline-none transition focus:border-brand/60"
+              className="mt-1.5 w-full rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-sm outline-none transition-colors duration-150 hover:border-white/[0.16] focus:border-brand/60 focus:ring-4 focus:ring-brand/10"
               autoComplete={mode === "register" ? "new-password" : "current-password"}
             />
           </label>
@@ -147,16 +147,16 @@ export default function LoginPage() {
               required
               value={password2}
               onChange={(e) => setPassword2(e.target.value)}
-              className="mt-1.5 w-full rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-sm outline-none transition focus:border-brand/60"
+              className="mt-1.5 w-full rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-sm outline-none transition-colors duration-150 hover:border-white/[0.16] focus:border-brand/60 focus:ring-4 focus:ring-brand/10"
               autoComplete="new-password"
             />
           </label>
         )}
         {message && (
-          <div className={`rounded-card border p-3 text-sm ${
+          <div className={`rounded-btn border p-3 text-sm ${
             messageIsError
-              ? "border-rose-400/30 bg-rose-400/10 text-rose-200"
-              : "border-brand/30 bg-brand/10 text-brand"
+              ? "border-danger/30 bg-danger/10 text-danger"
+              : "border-success/30 bg-success/10 text-success"
           }`}>
             {message}
           </div>

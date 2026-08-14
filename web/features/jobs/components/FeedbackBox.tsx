@@ -7,16 +7,16 @@ type Rating = "accurate" | "partial" | "inaccurate";
 
 const RATING_STYLES: Record<Rating, { active: string; base: string }> = {
   accurate: {
-    active: "border-emerald-400/50 bg-emerald-400/15 text-emerald-300",
-    base: "border-white/[0.08] bg-white/[0.02] text-fg-muted hover:border-emerald-400/40 hover:text-fg",
+    active: "border-success/50 bg-success/15 text-success",
+    base: "border-white/[0.08] bg-white/[0.02] text-fg-muted hover:border-success/40 hover:text-fg",
   },
   partial: {
-    active: "border-amber-400/50 bg-amber-400/15 text-amber-300",
-    base: "border-white/[0.08] bg-white/[0.02] text-fg-muted hover:border-amber-400/40 hover:text-fg",
+    active: "border-warning/50 bg-warning/15 text-warning",
+    base: "border-white/[0.08] bg-white/[0.02] text-fg-muted hover:border-warning/40 hover:text-fg",
   },
   inaccurate: {
-    active: "border-rose-400/50 bg-rose-400/15 text-rose-300",
-    base: "border-white/[0.08] bg-white/[0.02] text-fg-muted hover:border-rose-400/40 hover:text-fg",
+    active: "border-danger/50 bg-danger/15 text-danger",
+    base: "border-white/[0.08] bg-white/[0.02] text-fg-muted hover:border-danger/40 hover:text-fg",
   },
 };
 
@@ -59,7 +59,7 @@ export function FeedbackBox({
 
   if (!isLoggedIn) {
     return (
-      <div className="rounded-card border border-dashed border-white/[0.1] bg-white/[0.02] p-4 text-xs text-fg-muted">
+      <div className="rounded-btn border border-dashed border-white/[0.1] bg-white/[0.02] p-4 text-xs text-fg-muted">
         {t.feedback.loginHint}
       </div>
     );
@@ -91,26 +91,26 @@ export function FeedbackBox({
             key={r}
             type="button"
             onClick={() => { setRating(r); setStatus("idle"); }}
-            className={`rounded-btn border px-3 py-1.5 text-xs font-medium transition ${RATING_STYLES[r][rating === r ? "active" : "base"]}`}
+            className={`rounded-btn border px-3 py-1.5 text-xs font-medium transition-colors duration-150 ${RATING_STYLES[r][rating === r ? "active" : "base"]}`}
           >
             {t.feedback[r]}
           </button>
         ))}
-        {status === "saved" && <span className="text-xs text-brand">{t.feedback.saved}</span>}
-        {status === "error" && <span className="text-xs text-rose-300">{t.feedback.error}</span>}
+        {status === "saved" && <span className="text-xs text-success">{t.feedback.saved}</span>}
+        {status === "error" && <span className="text-xs text-danger">{t.feedback.error}</span>}
       </div>
       <textarea
         value={comment}
         onChange={(e) => { setComment(e.target.value); setStatus("idle"); }}
         placeholder={t.feedback.commentPlaceholder}
         rows={2}
-        className="w-full rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-xs outline-none transition placeholder:text-fg-subtle focus:border-brand/60"
+        className="w-full rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-small outline-none transition-colors duration-150 placeholder:text-fg-subtle focus:border-brand/60"
       />
       <button
         type="button"
         disabled={!rating || status === "saving"}
         onClick={() => void submit()}
-        className="btn-primary rounded-btn px-4 py-1.5 text-xs font-semibold"
+        className="btn-primary rounded-btn px-3.5 py-1.5 text-small font-medium"
       >
         {status === "saving" ? t.auth.busy : existing ? t.feedback.update : t.feedback.submit}
       </button>

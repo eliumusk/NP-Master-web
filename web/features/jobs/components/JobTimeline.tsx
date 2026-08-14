@@ -10,7 +10,7 @@ export function JobTimeline({ job }: { job: JobSummary }) {
   const active = inferStage(job.status, job.log_tail);
 
   return (
-    <ol className="flex items-start">
+    <ol className="flex items-start overflow-x-auto">
       {stages.map((label, i) => {
         let state: StageState;
         if (job.status === "done") state = "done";
@@ -20,16 +20,16 @@ export function JobTimeline({ job }: { job: JobSummary }) {
           state = i < active ? "done" : i === active ? "active" : "pending";
         }
         return (
-          <li key={label} className="flex min-w-0 flex-1 items-start last:flex-none">
-            <div className="flex min-w-0 flex-col items-center">
-              <span className={dotClass(state)} />
-              <span className={`mt-2 whitespace-nowrap text-[11px] ${labelClass(state)}`}>{label}</span>
+          <li key={label} className="flex min-w-[4.5rem] flex-1 flex-col last:flex-none">
+            <div className="flex items-center">
+              <StageDot state={state} />
+              {i < stages.length - 1 && (
+                <span
+                  className={`mx-2 h-px min-w-3 flex-1 ${i < active || job.status === "done" ? "bg-brand/60" : "bg-border"}`}
+                />
+              )}
             </div>
-            {i < stages.length - 1 && (
-              <span
-                className={`mx-2 mt-[7px] h-px min-w-3 flex-1 ${i < active || job.status === "done" ? "bg-brand/60" : "bg-border"}`}
-              />
-            )}
+            <span className={`mt-2 whitespace-nowrap text-micro ${labelClass(state)}`}>{label}</span>
           </li>
         );
       })}
@@ -52,17 +52,28 @@ function inferStage(status: string, logTail: string | null, stageCount = 6): num
   return status === "running" ? 1 : 0;
 }
 
-function dotClass(state: StageState) {
-  const base = "block h-3.5 w-3.5 rounded-full";
+function StageDot({ state }: { state: StageState }) {
   switch (state) {
     case "done":
-      return `${base} bg-brand`;
+      return (
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-brand-soft ring-1 ring-inset ring-brand/40">
+          <svg className="h-2.5 w-2.5 text-brand" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 5.5l2 2 4-4.5" />
+          </svg>
+        </span>
+      );
     case "active":
-      return `${base} pulse-dot bg-brand ring-4 ring-brand/25`;
+      return <span className="pulse-dot block h-3 w-3 shrink-0 rounded-full bg-brand ring-2 ring-brand/30" />;
     case "failed":
-      return `${base} bg-rose-400 ring-4 ring-rose-400/25`;
+      return (
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-danger/10 ring-1 ring-inset ring-danger/40">
+          <svg className="h-2.5 w-2.5 text-danger" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M3 3l4 4M7 3l-4 4" />
+          </svg>
+        </span>
+      );
     default:
-      return `${base} bg-elevated ring-1 ring-inset ring-border`;
+      return <span className="block h-3 w-3 shrink-0 rounded-full bg-elevated ring-1 ring-inset ring-border" />;
   }
 }
 
@@ -73,7 +84,7 @@ function labelClass(state: StageState) {
     case "active":
       return "font-medium text-brand";
     case "failed":
-      return "font-medium text-rose-300";
+      return "font-medium text-danger";
     default:
       return "text-fg-subtle";
   }

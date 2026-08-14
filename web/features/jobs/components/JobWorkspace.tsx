@@ -68,7 +68,7 @@ export function JobWorkspace({
   const detailSuffix = clientIdOverride ? `?client_id=${encodeURIComponent(clientIdOverride)}` : "";
 
   return (
-    <div className="animate-fade-in space-y-5">
+    <div className="mx-auto w-full max-w-7xl animate-fade-in space-y-6 px-5 sm:px-6">
       <JobHeader job={job} />
       <JobOverview job={job} genomes={genomes} regions={regions} summaryUrl={summaryUrl} />
 

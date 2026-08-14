@@ -10,6 +10,8 @@ import { LogoutButton } from "./LogoutButton";
 export function SiteHeader({ email }: { email: string | null }) {
   const pathname = usePathname();
   const { t } = useI18n();
+  // Matches the page container rule: job workspace pages run wider than the rest.
+  const wide = /^\/jobs\/[^/]+$/.test(pathname);
 
   const nav = [
     { href: "/submit", label: t.nav.submit },
@@ -18,14 +20,10 @@ export function SiteHeader({ email }: { email: string | null }) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-bg/80 backdrop-blur-md">
-      <div className="mx-auto flex h-16 w-full max-w-[92rem] items-center justify-between px-5">
+      <div className={`mx-auto flex h-16 w-full ${wide ? "max-w-7xl" : "max-w-6xl"} items-center justify-between px-5 sm:px-6`}>
         <Link href="/" className="group flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-soft ring-1 ring-inset ring-brand/30 transition group-hover:ring-brand/60">
-            <Logo className="h-5 w-5 text-brand" />
-          </span>
-          <span className="text-[15px] font-semibold tracking-tight">
-            <span className="text-brand">BGC</span>Master
-          </span>
+          <Logo className="h-8 w-8 transition-opacity group-hover:opacity-80" />
+          <span className="text-lead font-semibold tracking-tight text-fg">BGCMaster</span>
         </Link>
 
         <nav className="flex items-center gap-1 text-sm">
@@ -35,7 +33,7 @@ export function SiteHeader({ email }: { email: string | null }) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`rounded-btn px-3 py-1.5 transition ${
+                className={`rounded-btn px-3 py-1.5 transition-colors duration-150 ${
                   active ? "bg-elevated text-fg" : "text-fg-muted hover:bg-elevated/60 hover:text-fg"
                 }`}
               >
@@ -52,7 +50,10 @@ export function SiteHeader({ email }: { email: string | null }) {
               <LogoutButton />
             </div>
           ) : (
-            <Link href="/login" className="btn-primary ml-2 rounded-btn px-3.5 py-1.5 text-sm font-medium">
+            <Link
+              href="/login"
+              className="ml-2 rounded-btn border border-white/[0.08] px-3.5 py-1.5 text-body font-medium text-fg transition-colors duration-150 hover:border-white/[0.16]"
+            >
               {t.nav.login}
             </Link>
           )}

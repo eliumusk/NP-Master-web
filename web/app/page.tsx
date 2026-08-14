@@ -8,20 +8,16 @@ export default async function HomePage() {
   const t = getDictionary(locale);
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="mx-auto w-full max-w-6xl px-5 sm:px-6">
       {/* ── Hero ─────────────────────────────────────────────── */}
-      <section className="grid items-center gap-10 py-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,30rem)] lg:py-20">
-        <div className="animate-fade-in">
-          <div className="inline-flex items-center gap-2 rounded-pill border border-white/[0.08] bg-white/[0.03] px-3 py-1 font-mono text-[11px] tracking-wide text-fg-muted">
-            <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-pill bg-brand" />
-            {t.home.eyebrow}
-          </div>
-          <h1 className="mt-5 max-w-2xl text-4xl font-semibold leading-[1.12] tracking-[-0.02em] sm:text-5xl">
+      <section className="grid items-center gap-10 py-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,30rem)]">
+        <div>
+          <h1 className="text-display font-semibold tracking-normal text-fg">
             {t.home.titleA}
-            <span className="text-brand">BGC</span>
+            <br />
             {t.home.titleB}
           </h1>
-          <p className="mt-5 max-w-xl text-[15px] leading-7 text-fg-muted">
+          <p className="mt-5 max-w-[42rem] text-lead text-fg-muted">
             {t.home.subtitle}
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -30,21 +26,21 @@ export default async function HomePage() {
             </Link>
             <Link
               href="/jobs"
-              className="rounded-btn border border-white/[0.1] px-5 py-2.5 text-sm font-medium text-fg transition hover:border-white/25 hover:bg-white/[0.03]"
+              className="rounded-btn border border-white/[0.08] px-5 py-2.5 text-sm font-medium text-fg transition-colors duration-150 hover:border-white/[0.16] hover:bg-white/[0.03]"
             >
               {t.home.ctaSecondary}
             </Link>
-            <span className="text-xs text-fg-subtle">
-              {user ? `${t.home.loggedInAs} ${user.email}` : t.home.anonNote}
-            </span>
           </div>
+          <p className="mt-3 text-caption text-fg-subtle">
+            {user ? `${t.home.loggedInAs} ${user.email}` : t.home.anonNote}
+          </p>
         </div>
 
         <HeroVisual />
       </section>
 
       {/* ── Pipeline ─────────────────────────────────────────── */}
-      <section className="border-t border-white/[0.06] py-12">
+      <section className="py-16">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {t.home.steps.map((step, i) => (
             <Step key={step.title} n={`0${i + 1}`} title={step.title} desc={step.desc} />
@@ -53,7 +49,7 @@ export default async function HomePage() {
       </section>
 
       {/* ── Methods ──────────────────────────────────────────── */}
-      <section className="grid gap-3 pb-14 sm:grid-cols-3">
+      <section className="grid gap-3 py-16 sm:grid-cols-3">
         {t.home.methods.map((method) => (
           <Method key={method.tag} tag={method.tag} title={method.title} desc={method.desc} />
         ))}
@@ -65,7 +61,7 @@ export default async function HomePage() {
 function Step({ n, title, desc }: { n: string; title: string; desc: string }) {
   return (
     <div className="panel p-4">
-      <div className="font-mono text-[11px] tracking-widest text-brand">{n}</div>
+      <div className="font-mono text-micro text-fg-subtle">{n}</div>
       <div className="mt-2 text-sm font-semibold">{title}</div>
       <div className="mt-1 text-xs leading-5 text-fg-muted">{desc}</div>
     </div>
@@ -75,9 +71,9 @@ function Step({ n, title, desc }: { n: string; title: string; desc: string }) {
 function Method({ tag, title, desc }: { tag: string; title: string; desc: string }) {
   return (
     <div className="panel p-5">
-      <div className="font-mono text-[10px] tracking-[0.18em] text-fg-subtle">{tag}</div>
-      <div className="mt-2 text-[15px] font-semibold">{title}</div>
-      <div className="mt-1.5 text-[13px] leading-6 text-fg-muted">{desc}</div>
+      <div className="font-mono text-micro tracking-[0.18em] text-fg-subtle">{tag}</div>
+      <div className="mt-2 text-lead font-semibold">{title}</div>
+      <div className="mt-1.5 text-small text-fg-muted">{desc}</div>
     </div>
   );
 }
@@ -101,10 +97,6 @@ function HeroVisual() {
     <div className="bg-grid-faint panel relative overflow-hidden p-4">
       <svg viewBox={`0 0 ${W} ${H}`} className="block w-full" role="img" aria-label="BGC score track">
         <defs>
-          <linearGradient id="hero-line" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="rgb(94,234,212)" />
-            <stop offset="100%" stopColor="rgb(167,139,250)" />
-          </linearGradient>
           <linearGradient id="hero-fill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="rgb(94,234,212)" stopOpacity="0.22" />
             <stop offset="100%" stopColor="rgb(94,234,212)" stopOpacity="0" />
@@ -117,7 +109,7 @@ function HeroVisual() {
         <line x1="0" x2={W} y1={BASE - 0.8 * AMP} y2={BASE - 0.8 * AMP} stroke="rgb(226,232,240)" strokeOpacity="0.25" strokeDasharray="3 5" />
 
         <path d={area} fill="url(#hero-fill)" />
-        <path d={line} fill="none" stroke="url(#hero-line)" strokeWidth="2" strokeLinejoin="round" />
+        <path d={line} fill="none" stroke="rgb(94 234 212)" strokeWidth="1.5" strokeLinejoin="round" />
 
         <line x1="0" x2={W} y1={BASE} y2={BASE} stroke="rgb(148,163,184)" strokeOpacity="0.4" />
 
@@ -137,10 +129,6 @@ function HeroVisual() {
           />
         ))}
       </svg>
-      <div className="flex justify-between px-1 pb-1 font-mono text-[10px] text-fg-subtle">
-        <span>contig score track</span>
-        <span>2 regions called</span>
-      </div>
     </div>
   );
 }

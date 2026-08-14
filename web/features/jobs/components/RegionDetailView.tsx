@@ -3,21 +3,12 @@
 import Link from "next/link";
 import type { SignedJobArtifact } from "@/lib/job-artifacts";
 import { useI18n } from "@/lib/i18n/client";
-import { bgcTypeMeta, functionClassMeta } from "../constants";
+import { EVIDENCE_CHIP, bgcTypeMeta, functionClassColor, functionClassMeta } from "../constants";
 import { formatBp, formatPercent, formatRange, formatScore } from "../format";
 import { evidenceKey, extendedLength, seedGeneOf } from "../stats";
 import type { CdsFeature, PfamDomain, Region } from "../types";
 import { FeedbackBox } from "./FeedbackBox";
 import { GeneTrack } from "./GeneTrack";
-
-const EVIDENCE_CHIP: Record<string, string> = {
-  tier1: "bg-emerald-400/10 text-emerald-300 ring-1 ring-inset ring-emerald-400/30",
-  tier2: "bg-sky-400/10 text-sky-300 ring-1 ring-inset ring-sky-400/30",
-  tier3: "bg-amber-400/10 text-amber-300 ring-1 ring-inset ring-amber-400/30",
-  tier4: "bg-white/[0.05] text-fg-muted ring-1 ring-inset ring-white/[0.08]",
-  tier5: "bg-rose-400/10 text-rose-300 ring-1 ring-inset ring-rose-400/30",
-  none: "bg-white/[0.05] text-fg-muted ring-1 ring-inset ring-white/[0.08]",
-};
 
 export function RegionDetailView({
   jobId,
@@ -48,11 +39,26 @@ export function RegionDetailView({
   const dnaArtifact = genomeArtifacts.find((a) => a.kind === "extended_regions_fna");
 
   return (
-    <div className="animate-fade-in mx-auto max-w-6xl space-y-5">
+    <div className="animate-fade-in mx-auto w-full max-w-6xl space-y-5 px-5 sm:px-6">
       {/* ── header ─────────────────────────────────────────── */}
       <div>
-        <Link href={backHref} className="text-xs text-fg-muted transition hover:text-brand">
-          ← {t.region.back} · {jobTitle}
+        <Link
+          href={backHref}
+          className="inline-flex max-w-full items-center gap-1 text-xs text-fg-muted transition-colors duration-150 hover:text-fg"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="h-3.5 w-3.5 shrink-0"
+          >
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+          <span className="truncate">{t.region.back} · {jobTitle}</span>
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="font-mono text-2xl font-semibold tracking-tight">{bgcId}</h1>
@@ -84,8 +90,8 @@ export function RegionDetailView({
         ) : (
           <div className="mt-3 overflow-auto rounded-btn border border-white/[0.06]">
             <table className="w-full min-w-[40rem] text-xs">
-              <thead className="bg-white/[0.02] text-left">
-                <tr className="border-b border-white/[0.06] text-[11px] uppercase tracking-wider text-fg-subtle">
+              <thead className="sticky top-0 bg-surface/95 text-left backdrop-blur-sm">
+                <tr className="border-b border-white/[0.06] text-micro uppercase tracking-wider text-fg-subtle">
                   <th className="px-3 py-2.5 font-medium">{t.region.colGene}</th>
                   <th className="px-3 py-2.5 font-medium">{t.region.colProduct}</th>
                   <th className="px-3 py-2.5 text-right font-medium">{t.region.colCdsLen}</th>
@@ -95,7 +101,7 @@ export function RegionDetailView({
               </thead>
               <tbody>
                 {cdsList.map((cds, i) => (
-                  <tr key={`${cds.locus_tag ?? "cds"}-${i}`} className="border-b border-white/[0.04] last:border-0">
+                  <tr key={`${cds.locus_tag ?? "cds"}-${i}`} className="border-b border-white/[0.06] transition-colors last:border-0 hover:bg-white/[0.03]">
                     <td className="px-3 py-2 font-mono text-fg">{cds.locus_tag || `cds_${i + 1}`}</td>
                     <td className="max-w-[18rem] px-3 py-2">
                       <span className="block truncate text-fg-muted" title={cds.product || ""}>{cds.product || "-"}</span>
@@ -107,8 +113,12 @@ export function RegionDetailView({
                       {cds.length_aa != null ? `${cds.length_aa} aa` : "-"}
                     </td>
                     <td className="px-3 py-2">
-                      <span className={`inline-flex rounded-pill px-2 py-0.5 text-[11px] font-medium ${functionClassMeta(cds.function_class, locale).className}`}>
-                        {functionClassMeta(cds.function_class, locale).label}
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: functionClassColor(cds.function_class) }}
+                        />
+                        <span className="truncate text-fg-muted">{functionClassMeta(cds.function_class, locale).label}</span>
                       </span>
                     </td>
                   </tr>
@@ -141,7 +151,7 @@ export function RegionDetailView({
       {/* ── 5. evidence ────────────────────────────────────── */}
       <section className="panel p-5">
         <h2 className="text-sm font-semibold">{t.region.evidence}</h2>
-        <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-btn border border-white/[0.06] bg-white/[0.05] sm:grid-cols-4">
+        <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-btn border border-white/[0.06] bg-white/[0.06] sm:grid-cols-4">
           <EvidenceMeta label={t.region.coreScore} value={formatScore(region.score)} />
           <EvidenceMeta label={t.region.typeScore} value={formatScore(region.type_score)} />
           <EvidenceMeta label={t.region.evidenceRating} value={t.evidence[evidenceKey(region)]} />
@@ -156,18 +166,19 @@ export function RegionDetailView({
         <div className="mt-3 grid gap-2 sm:grid-cols-3">
           <SeqButton
             label={t.region.seqProtein}
+            title={`${bgcId}_cds.faa`}
             disabled={!cdsList.some((c) => c.aa_sequence)}
             onClick={() => downloadFasta(`${bgcId}_cds.faa`, cdsList, "aa")}
           />
           <SeqButton
             label={t.region.seqNt}
+            title={`${bgcId}_cds.fna`}
             disabled={!cdsList.some((c) => c.nt_sequence)}
             onClick={() => downloadFasta(`${bgcId}_cds.fna`, cdsList, "nt")}
           />
           {dnaArtifact ? (
-            <a href={dnaArtifact.url} className={seqBtnClass(false)}>
+            <a href={dnaArtifact.url} title={dnaArtifact.filename} className={seqBtnClass(false)}>
               {t.region.seqDna}
-              <span className="mt-0.5 block text-[10px] font-normal text-fg-subtle">{dnaArtifact.filename}</span>
             </a>
           ) : (
             <span className={seqBtnClass(true)}>{t.region.seqDna}</span>
@@ -190,16 +201,16 @@ export function RegionDetailView({
 /* ── helpers ─────────────────────────────────────────────────── */
 
 function seqBtnClass(disabled: boolean) {
-  return `rounded-btn border px-3 py-2.5 text-left text-xs font-medium transition ${
+  return `rounded-btn border px-3 py-2.5 text-left text-xs font-medium transition-colors duration-150 ${
     disabled
       ? "cursor-not-allowed border-white/[0.06] text-fg-subtle"
-      : "border-white/[0.1] bg-white/[0.02] text-fg hover:border-brand/50 hover:bg-brand/[0.05]"
+      : "border-white/[0.08] bg-white/[0.02] text-fg hover:border-white/[0.16] hover:bg-white/[0.04]"
   }`;
 }
 
-function SeqButton({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) {
+function SeqButton({ label, title, disabled, onClick }: { label: string; title?: string; disabled: boolean; onClick: () => void }) {
   return (
-    <button type="button" disabled={disabled} onClick={onClick} className={seqBtnClass(disabled)}>
+    <button type="button" title={title} disabled={disabled} onClick={onClick} className={seqBtnClass(disabled)}>
       {label}
     </button>
   );
@@ -232,14 +243,17 @@ function TypeScores({ scores }: { scores: Record<string, number> | null }) {
   if (items.length === 0) return null;
   return (
     <div className="mt-4 space-y-2.5">
-      {items.map(([type, value]) => {
+      {items.map(([type, value], i) => {
         const meta = bgcTypeMeta(type);
         const normalized = Number(value) <= 1 ? Number(value) : Number(value) / 100;
         return (
           <div key={type} className="grid grid-cols-[7rem,1fr,3.5rem] items-center gap-2 text-xs">
             <div className="truncate text-fg-muted">{meta.label}</div>
             <div className="h-1.5 overflow-hidden rounded-pill bg-white/[0.06]">
-              <div className={`h-full rounded-pill ${meta.barClassName}`} style={{ width: `${Math.max(2, Math.min(100, normalized * 100))}%` }} />
+              <div
+                className={`h-full rounded-pill ${i === 0 ? meta.barClassName : "bg-white/20"}`}
+                style={{ width: `${Math.max(2, Math.min(100, normalized * 100))}%` }}
+              />
             </div>
             <div className="numeric-display text-right text-fg">{formatPercent(Number(value))}</div>
           </div>
@@ -258,7 +272,7 @@ function MibigPanel({ region }: { region: Region }) {
   const best = hits[0];
   return (
     <div className="mt-3 space-y-2">
-      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-btn border border-white/[0.06] bg-white/[0.05] sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-btn border border-white/[0.06] bg-white/[0.06] sm:grid-cols-3">
         <EvidenceMeta label={t.region.mibigBest} value={best.bgc_id || "-"} mono />
         <EvidenceMeta label={t.region.mibigProduct} value={best.product || t.explorer.unknownProduct} />
         <EvidenceMeta label={t.region.mibigIdentity} value={best.identity == null ? "-" : formatPercent(best.identity)} />
@@ -266,7 +280,7 @@ function MibigPanel({ region }: { region: Region }) {
       {hits.length > 1 && (
         <div className="space-y-1.5">
           {hits.slice(1, 5).map((hit, i) => (
-            <div key={`${hit.bgc_id ?? "hit"}-${i}`} className="flex items-center justify-between gap-3 rounded-btn border border-white/[0.05] bg-white/[0.02] px-3 py-2 text-xs">
+            <div key={`${hit.bgc_id ?? "hit"}-${i}`} className="flex items-center justify-between gap-3 rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-xs">
               <span className="truncate font-mono text-fg">{hit.bgc_id || "-"}</span>
               <span className="truncate text-fg-subtle">{hit.product || t.explorer.unknownProduct}</span>
               <span className="numeric-display shrink-0 text-brand">{hit.identity == null ? "-" : formatPercent(hit.identity)}</span>
@@ -287,7 +301,7 @@ function DomainTable({ domains }: { domains: Array<PfamDomain & { locusTag: stri
     <div className="mt-3 max-h-72 overflow-auto rounded-btn border border-white/[0.06]">
       <table className="w-full min-w-[38rem] text-xs">
         <thead className="sticky top-0 bg-surface/95 text-left backdrop-blur-sm">
-          <tr className="border-b border-white/[0.06] text-[11px] uppercase tracking-wider text-fg-subtle">
+          <tr className="border-b border-white/[0.06] text-micro uppercase tracking-wider text-fg-subtle">
             <th className="px-3 py-2.5 font-medium">{t.region.colGene}</th>
             <th className="px-3 py-2.5 font-medium">{t.region.colDomain}</th>
             <th className="px-3 py-2.5 font-medium">{t.region.colAcc}</th>
@@ -297,7 +311,7 @@ function DomainTable({ domains }: { domains: Array<PfamDomain & { locusTag: stri
         </thead>
         <tbody>
           {domains.map((d, i) => (
-            <tr key={`${d.locusTag}-${d.accession ?? d.name}-${i}`} className="border-b border-white/[0.04] last:border-0">
+            <tr key={`${d.locusTag}-${d.accession ?? d.name}-${i}`} className="border-b border-white/[0.06] transition-colors last:border-0 hover:bg-white/[0.03]">
               <td className="px-3 py-2 font-mono text-fg">{d.locusTag}</td>
               <td className="max-w-[14rem] px-3 py-2">
                 <span className="block truncate text-fg" title={d.name || ""}>{d.name || "-"}</span>
@@ -316,10 +330,12 @@ function DomainTable({ domains }: { domains: Array<PfamDomain & { locusTag: stri
 }
 
 function EvidenceMeta({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  // Numeric-looking values get tabular figures; text stays in the base font.
+  const numeric = /^[\d.,%\-– ]+$/.test(value);
   return (
     <div className="min-w-0 bg-surface px-3 py-2.5">
-      <div className="text-[11px] text-fg-subtle">{label}</div>
-      <div className={`mt-0.5 truncate text-[13px] font-medium text-fg ${mono ? "font-mono" : "numeric-display"}`}>{value}</div>
+      <div className="text-micro text-fg-subtle">{label}</div>
+      <div className={`mt-0.5 truncate text-small font-medium text-fg ${mono ? "font-mono" : numeric ? "numeric-display" : ""}`}>{value}</div>
     </div>
   );
 }

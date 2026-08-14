@@ -15,26 +15,33 @@ export default async function JobsPage() {
 
   let query = admin
     .from("jobs")
-    .select("id,title,status,n_genomes,n_regions,n_safe,created_at,started_at,finished_at,error,log_tail")
+    .select("id,title,status,n_genomes,n_regions,n_safe,created_at,error")
     .order("created_at", { ascending: false })
     .limit(50);
   query = user ? query.eq("user_id", user.id) : clientId ? query.eq("client_id", clientId) : query.is("id", null);
   const { data: jobs } = await query;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <div className="mx-auto w-full max-w-6xl space-y-5 px-5 sm:px-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t.jobs.title}</h1>
+          <h1 className="text-2xl font-semibold">{t.jobs.title}</h1>
           <p className="mt-1 text-sm text-fg-muted">
-            {user ? `${t.jobs.subtitleAuthed}${user.email}` : t.jobs.subtitleAnon}
+            {user ? (
+              <>
+                {t.jobs.subtitleAuthed}
+                <span className="font-mono text-fg">{user.email}</span>
+              </>
+            ) : (
+              t.jobs.subtitleAnon
+            )}
           </p>
         </div>
         <Link href="/submit" className="btn-primary rounded-btn px-4 py-2 text-sm font-semibold">
           {t.jobs.newJob}
         </Link>
       </div>
-      <JobsList jobs={jobs ?? []} t={t.jobs} statusLabels={t.status} />
+      <JobsList jobs={jobs ?? []} t={t.jobs} statusLabels={t.status} locale={locale} />
     </div>
   );
 }

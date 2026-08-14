@@ -2,7 +2,10 @@ import type { Config } from "tailwindcss";
 
 // BGCMaster dark "instrument" theme. Semantic tokens map to CSS variables
 // in app/globals.css — use `text-fg`, `bg-surface`, etc., not raw palette
-// classes, in components.
+// classes, in components. Status colours (success/warning/danger) are for
+// state indication only; `bgc-*` hues are reserved for BGC product types.
+// `fontSize` adds a fixed type scale (text-micro … text-display) — use it
+// instead of arbitrary px sizes.
 
 const config: Config = {
   content: [
@@ -27,30 +30,38 @@ const config: Config = {
           soft:     "rgb(var(--brand-soft) / <alpha-value>)",
           softer:   "rgb(var(--brand-softer) / <alpha-value>)",
         },
-        accent:     "rgb(var(--accent) / <alpha-value>)",
+        success:    "rgb(var(--success) / <alpha-value>)",
+        warning:    "rgb(var(--warning) / <alpha-value>)",
+        danger:     "rgb(var(--danger) / <alpha-value>)",
         // ── BGC type colours (dark-theme calibrated, antiSMASH-ish hues) ──
         bgc: {
-          nrp:        { DEFAULT: "#60a5fa", soft: "#dbeafe", fg: "#1e40af" }, // blue-400
-          polyketide: { DEFAULT: "#a78bfa", soft: "#ede9fe", fg: "#5b21b6" }, // violet-400
-          terpene:    { DEFAULT: "#34d399", soft: "#d1fae5", fg: "#047857" }, // emerald-400
-          ripp:       { DEFAULT: "#fb923c", soft: "#ffedd5", fg: "#c2410c" }, // orange-400
-          alkaloid:   { DEFAULT: "#f87171", soft: "#fee2e2", fg: "#b91c1c" }, // red-400
-          saccharide: { DEFAULT: "#f472b6", soft: "#fce7f3", fg: "#be185d" }, // pink-400
-          other:      { DEFAULT: "#94a3b8", soft: "#f1f5f9", fg: "#475569" }, // slate-400
+          nrp:        "#60a5fa", // blue-400
+          polyketide: "#a78bfa", // violet-400
+          terpene:    "#34d399", // emerald-400
+          ripp:       "#fb923c", // orange-400
+          alkaloid:   "#f87171", // red-400
+          saccharide: "#f472b6", // pink-400
+          other:      "#94a3b8", // slate-400
         },
+      },
+      fontSize: {
+        micro:   ["11px", "16px"],
+        caption: ["12px", "16px"],
+        small:   ["13px", "20px"],
+        body:    ["14px", "22px"],
+        lead:    ["15px", "24px"],
+        kpi:     ["22px", "32px"],
+        title:   ["24px", "32px"],
+        display: ["40px", "1.15"],
       },
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       borderRadius: {
-        pill:    "9999px",
-        btn:     "0.5rem",
-        card:    "0.75rem",
-        section: "0.875rem",
-      },
-      maxWidth: {
-        content: "72rem",
+        pill: "9999px",
+        btn:  "0.5rem",
+        card: "0.75rem",
       },
       transitionTimingFunction: {
         out: "cubic-bezier(0.16, 1, 0.3, 1)",

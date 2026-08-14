@@ -98,11 +98,24 @@ export function tierLabel(tier: string | null | undefined, locale: Locale = "zh"
   return tier;
 }
 
+// Evidence chip classes — single source for the explorer table, the region
+// detail header and tierClassName. tier1/tier2 share the success colour; the
+// label text carries the distinction. Class strings must stay literal so
+// Tailwind's JIT picks them up.
+export const EVIDENCE_CHIP: Record<string, string> = {
+  tier1: "bg-success/10 text-success ring-1 ring-inset ring-success/30",
+  tier2: "bg-success/10 text-success ring-1 ring-inset ring-success/30",
+  tier3: "bg-warning/10 text-warning ring-1 ring-inset ring-warning/30",
+  tier4: "bg-white/[0.03] text-fg-muted ring-1 ring-inset ring-white/[0.08]",
+  tier5: "bg-danger/10 text-danger ring-1 ring-inset ring-danger/30",
+  none: "bg-white/[0.03] text-fg-muted ring-1 ring-inset ring-white/[0.08]",
+};
+
 export function tierClassName(tier: string | null | undefined, safePass?: boolean) {
-  if (!tier) return "bg-elevated text-fg-muted ring-1 ring-inset ring-border";
-  if (tier.startsWith("Tier1")) return "bg-emerald-400/10 text-emerald-300 ring-1 ring-inset ring-emerald-400/30";
-  if (tier.startsWith("Tier2")) return "bg-sky-400/10 text-sky-300 ring-1 ring-inset ring-sky-400/30";
-  if (tier.startsWith("Tier3")) return "bg-amber-400/10 text-amber-300 ring-1 ring-inset ring-amber-400/30";
-  if (safePass) return "bg-elevated text-fg ring-1 ring-inset ring-border";
-  return "bg-rose-400/10 text-rose-300 ring-1 ring-inset ring-rose-400/30";
+  if (!tier) return EVIDENCE_CHIP.none;
+  if (tier.startsWith("Tier1")) return EVIDENCE_CHIP.tier1;
+  if (tier.startsWith("Tier2")) return EVIDENCE_CHIP.tier2;
+  if (tier.startsWith("Tier3")) return EVIDENCE_CHIP.tier3;
+  if (safePass) return EVIDENCE_CHIP.tier4;
+  return EVIDENCE_CHIP.tier5;
 }

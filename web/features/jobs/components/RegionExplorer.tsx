@@ -2,19 +2,10 @@
 
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n/client";
-import { ALL_FILTER, bgcTypeMeta } from "../constants";
-import { formatBp, formatRange, formatScore } from "../format";
+import { ALL_FILTER, EVIDENCE_CHIP, bgcTypeMeta } from "../constants";
+import { formatRange, formatScore } from "../format";
 import { evidenceKey, extendedLength, seedGeneOf } from "../stats";
 import type { Region, RegionFilters } from "../types";
-
-const EVIDENCE_CHIP: Record<string, string> = {
-  tier1: "bg-emerald-400/10 text-emerald-300 ring-1 ring-inset ring-emerald-400/30",
-  tier2: "bg-sky-400/10 text-sky-300 ring-1 ring-inset ring-sky-400/30",
-  tier3: "bg-amber-400/10 text-amber-300 ring-1 ring-inset ring-amber-400/30",
-  tier4: "bg-white/[0.05] text-fg-muted ring-1 ring-inset ring-white/[0.08]",
-  tier5: "bg-rose-400/10 text-rose-300 ring-1 ring-inset ring-rose-400/30",
-  none: "bg-white/[0.05] text-fg-muted ring-1 ring-inset ring-white/[0.08]",
-};
 
 export function RegionExplorer({
   regions,
@@ -43,15 +34,15 @@ export function RegionExplorer({
       <div className="border-b border-white/[0.06] p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-fg-muted">
-            {t.explorer.showing} <span className="numeric-display text-brand">{regions.length}</span>
+            {t.explorer.showing} <span className="numeric-display font-medium text-fg">{regions.length}</span>
             <span className="text-fg-subtle"> {t.explorer.of} {allRegions.length}</span> {t.explorer.regionsUnit}
           </p>
-          <label className="flex cursor-pointer items-center gap-2 rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-xs transition hover:border-white/20">
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-fg-muted transition-colors duration-150 hover:text-fg">
             <input
               type="checkbox"
               checked={filters.safeOnly}
               onChange={(event) => onFiltersChange({ ...filters, safeOnly: event.target.checked })}
-              className="h-3.5 w-3.5 accent-brand"
+              className="checkbox"
             />
             {t.explorer.safeOnly}
           </label>
@@ -83,7 +74,7 @@ export function RegionExplorer({
             value={filters.query}
             onChange={(event) => onFiltersChange({ ...filters, query: event.target.value })}
             placeholder={t.explorer.searchPlaceholder}
-            className="h-9 w-full min-w-0 rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 text-[13px] text-fg outline-none transition placeholder:text-fg-subtle focus:border-brand/60"
+            className="h-9 w-full min-w-0 rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 text-small text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-brand/60"
           />
         </div>
       </div>
@@ -91,21 +82,22 @@ export function RegionExplorer({
       {/* ── main table ─────────────────────────────────────── */}
       <div className="max-h-[46rem] overflow-auto">
         {regions.length === 0 ? (
-          <div className="p-10 text-center text-sm text-fg-muted">{t.explorer.empty}</div>
+          <div className="m-4 rounded-card border border-dashed border-white/[0.08] p-10 text-center text-sm text-fg-muted">
+            {t.explorer.empty}
+          </div>
         ) : (
-          <table className="w-full min-w-[62rem] text-[13px]">
+          <table className="w-full min-w-[62rem] text-small">
             <thead className="sticky top-0 z-10 bg-surface/95 backdrop-blur-sm">
-              <tr className="border-b border-white/[0.06] text-left text-[11px] uppercase tracking-wider text-fg-subtle">
+              <tr className="border-b border-white/[0.06] text-left text-micro uppercase tracking-wider text-fg-subtle">
                 <th className="px-4 py-2.5 font-medium">{t.explorer.colBgc}</th>
                 <th className="px-3 py-2.5 font-medium">{t.explorer.colContig}</th>
-                <th className="px-3 py-2.5 font-medium">{t.explorer.colSpan}</th>
+                <th className="px-3 py-2.5 text-right font-medium">{t.explorer.colSpan}</th>
                 <th className="px-3 py-2.5 text-right font-medium">{t.explorer.colLen}</th>
                 <th className="px-3 py-2.5 font-medium">{t.explorer.colType}</th>
                 <th className="px-3 py-2.5 text-right font-medium">{t.explorer.colScore}</th>
                 <th className="px-3 py-2.5 font-medium">{t.explorer.colEvidence}</th>
                 <th className="px-3 py-2.5 font-medium">{t.explorer.colSeed}</th>
                 <th className="px-3 py-2.5 font-medium">{t.explorer.colMibig}</th>
-                <th className="px-4 py-2.5 font-medium">{t.explorer.colAction}</th>
               </tr>
             </thead>
             <tbody>
@@ -118,7 +110,6 @@ export function RegionExplorer({
                   detailUrl={detailHref(region.id)}
                   noHitLabel={t.explorer.noHit}
                   unknownProduct={t.explorer.unknownProduct}
-                  viewDetail={t.explorer.viewDetail}
                   locale={locale}
                 />
               ))}
@@ -137,7 +128,6 @@ function RegionRow({
   detailUrl,
   noHitLabel,
   unknownProduct,
-  viewDetail,
 }: {
   region: Region;
   bgcId: string;
@@ -145,7 +135,6 @@ function RegionRow({
   detailUrl: string;
   noHitLabel: string;
   unknownProduct: string;
-  viewDetail: string;
   locale: string;
 }) {
   const topHit = region.mibig_hits?.[0];
@@ -156,29 +145,33 @@ function RegionRow({
   const spanEnd = region.ext_end_bp ?? region.end_bp;
 
   return (
-    <tr className="group border-b border-white/[0.04] transition last:border-0 hover:bg-white/[0.03]">
+    <tr className="relative cursor-pointer border-b border-white/[0.06] transition-colors last:border-0 hover:bg-white/[0.03]">
       <td className="px-4 py-3">
-        <Link href={detailUrl} className="font-mono text-xs font-semibold text-brand hover:underline">
+        <Link
+          href={detailUrl}
+          className="font-mono text-caption font-medium text-fg transition-colors before:absolute before:inset-0 hover:text-brand"
+        >
           {bgcId}
         </Link>
       </td>
       <td className="max-w-[10rem] px-3 py-3">
         <div className="truncate font-mono text-xs text-fg" title={region.contig}>{region.contig}</div>
       </td>
-      <td className="numeric-display px-3 py-3 text-xs text-fg-muted">
+      <td className="numeric-display px-3 py-3 text-right text-xs text-fg-muted">
         {formatRange(spanStart, spanEnd)}
       </td>
       <td className="numeric-display px-3 py-3 text-right text-xs">
-        {extLen != null ? formatBp(extLen) : formatBp(Math.max(0, region.end_bp - region.start_bp))}
+        {Math.round(extLen ?? Math.max(0, region.end_bp - region.start_bp)).toLocaleString()}
       </td>
-      <td className="px-3 py-3">
-        <span className={`inline-flex max-w-32 items-center rounded-pill px-2 py-0.5 text-[11px] font-medium ${typeMeta.className}`}>
-          <span className="truncate">{typeMeta.label}</span>
+      <td className="max-w-[10rem] px-3 py-3">
+        <span className="flex items-center gap-2">
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${typeMeta.barClassName}`} />
+          <span className="min-w-0 truncate text-fg-muted">{typeMeta.label}</span>
         </span>
       </td>
       <td className="numeric-display px-3 py-3 text-right text-xs text-fg">{formatScore(region.score)}</td>
       <td className="px-3 py-3">
-        <span className={`inline-flex items-center rounded-pill px-2 py-0.5 text-[11px] font-medium ${EVIDENCE_CHIP[evidenceKey(region)]}`}>
+        <span className={`inline-flex items-center rounded-pill px-2 py-0.5 text-micro font-medium ${EVIDENCE_CHIP[evidenceKey(region)]}`}>
           {evidenceLabel}
         </span>
       </td>
@@ -202,11 +195,6 @@ function RegionRow({
           <span className="text-fg-subtle">{noHitLabel}</span>
         )}
       </td>
-      <td className="px-4 py-3">
-        <Link href={detailUrl} className="text-xs font-medium text-brand hover:underline">
-          {viewDetail}
-        </Link>
-      </td>
     </tr>
   );
 }
@@ -226,7 +214,7 @@ function FilterSelect({
     <select
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className="h-9 w-full min-w-0 rounded-btn border border-white/[0.08] bg-white/[0.02] px-2.5 text-[13px] text-fg outline-none transition focus:border-brand/60"
+      className="h-9 w-full min-w-0 rounded-btn border border-white/[0.08] bg-white/[0.02] px-2.5 text-small text-fg outline-none transition-colors focus:border-brand/60"
     >
       <option value={ALL_FILTER}>{allLabel}</option>
       {options.map((option) => (
