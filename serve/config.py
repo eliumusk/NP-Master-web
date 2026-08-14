@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     gpu_wait_timeout_sec: int = Field(default=1800, alias="GPU_WAIT_TIMEOUT_SEC")
     gpu_poll_sec: int = Field(default=30, alias="GPU_POLL_SEC")
 
+    # Resident GPU model daemon pool (one daemon per GPU holding Evo2 + U-Net).
+    # When unavailable the pipeline falls back to the cold-start subprocess path.
+    model_daemon_enabled: bool = Field(default=True, alias="MODEL_DAEMON_ENABLED")
+    model_daemon_gpus: str = Field(default="0,1,2,3,4,5,6,7", alias="MODEL_DAEMON_GPUS")
+    model_daemon_startup_timeout_sec: int = Field(default=900, alias="MODEL_DAEMON_STARTUP_TIMEOUT_SEC")
+    model_daemon_task_timeout_sec: int = Field(default=3600, alias="MODEL_DAEMON_TASK_TIMEOUT_SEC")
+    model_daemon_ready_staleness_sec: int = Field(default=60, alias="MODEL_DAEMON_READY_STALENESS_SEC")
+
     max_fasta_bytes: int = Field(default=50 * 1024 * 1024, alias="MAX_FASTA_BYTES")
     poll_interval_sec: int = Field(default=5, alias="POLL_INTERVAL_SEC")
     heartbeat_sec: int = Field(default=10, alias="HEARTBEAT_SEC")

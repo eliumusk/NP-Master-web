@@ -134,8 +134,93 @@ def _torch_lib_for(python_bin: Path) -> str:
     return str(candidates[0])
 
 
+def _daemon_available(settings: Settings) -> bool:
+    """True when the resident model daemon pool has >= 1 healthy daemon."""
+    if not settings.model_daemon_enabled:
+        return False
+    try:
+        from . import model_pool
+
+        return model_pool.available(settings)
+    except Exception as exc:
+        log.warning("model daemon health check failed: %s", exc)
+        return False
+
+
+def _extract_via_daemon(settings: Settings, fasta_path: Path, features_dir: Path, stem: str) -> str:
+    """Shard the extraction across resident daemons; outputs are merged exactly
+    like the cold parallel path (<stem>.partNNNN.npy + _windows.csv)."""
+    from . import model_pool
+    from .parallel_extract import (
+        WorkerSpec,
+        _merge_into_one_dir,
+        partition_window_ids,
+        walk_fasta_to_metadata,
+    )
+
+    work_dir = features_dir / "_meta"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    metadata_csv = work_dir / "windows_metadata.csv"
+    n_windows = walk_fasta_to_metadata(
+        fasta_path, metadata_csv,
+        window=settings.extract_window, stride=settings.extract_stride, stem=stem,
+    )
+    log.info("walk: %d windows from %s", n_windows, fasta_path.name)
+    if n_windows == 0:
+        raise PipelineError("FASTA produced 0 windows after filtering")
+
+    gpus = model_pool.healthy_gpus(settings)
+    n_workers = len(gpus)
+    subsets = partition_window_ids(metadata_csv, n_workers, work_dir / "daemon_subsets")
+    tasks: list[dict] = []
+    specs: list[WorkerSpec] = []
+    for i, gpu in enumerate(gpus):
+        out_subdir = features_dir / f"_w{i:02d}"
+        out_subdir.mkdir(parents=True, exist_ok=True)
+        tasks.append({
+            "kind": "extract_per_token",
+            "gpu": gpu,
+            "fasta": str(fasta_path),
+            "metadata_csv": str(metadata_csv),
+            "window_ids_txt": str(subsets[i]),
+            "out_dir": str(out_subdir),
+            "stem": stem,
+            "window": settings.extract_window,
+            "stride": settings.extract_stride,
+        })
+        specs.append(WorkerSpec(
+            worker_idx=i, host="daemon", cuda_device=gpu,
+            subset_txt=subsets[i], out_subdir=out_subdir,
+        ))
+
+    t0 = time.time()
+    results = model_pool.run_tasks(
+        settings, tasks,
+        progress_cb=lambda done, total: log.info("daemon extract: %d/%d shards done", done, total),
+    )
+    failures = [r for r in results if r["status"] != "ok"]
+    if failures:
+        raise PipelineError(
+            f"daemon extract failed on {len(failures)}/{len(results)} shards "
+            f"(first: {failures[0]['status']} {str(failures[0]['detail'])[:300]})"
+        )
+    n_parts = _merge_into_one_dir(specs, features_dir, stem)
+    dt = time.time() - t0
+    log.info("merged %d parts into %s", n_parts, features_dir)
+    return f"daemon extract: {n_parts} parts, {n_workers} daemons gpus={gpus}, {dt:.1f}s"
+
+
 def _extract(settings: Settings, fasta_path: Path, features_dir: Path, stem: str) -> str:
     features_dir.mkdir(parents=True, exist_ok=True)
+    if _daemon_available(settings):
+        try:
+            return _extract_via_daemon(settings, fasta_path, features_dir, stem)
+        except Exception as exc:
+            log.warning("daemon extract failed (%s); falling back to cold parallel extract", exc)
+            # Remove partial per-shard dirs so the cold path's merge cannot
+            # pick up daemon leftovers.
+            for leftover in features_dir.glob("_w*"):
+                shutil.rmtree(leftover, ignore_errors=True)
     hosts = [host.strip() for host in settings.extract_hosts.split(",") if host.strip()]
     n_workers = len(hosts) * settings.extract_gpus_per_host
     work_dir = features_dir / "_meta"
@@ -153,11 +238,35 @@ def _extract(settings: Settings, fasta_path: Path, features_dir: Path, stem: str
         gpus_per_host=settings.extract_gpus_per_host,
         work_dir=work_dir,
     )
-    return f"parallel extract: {n_parts} parts, {n_workers} workers, {time.time() - t0:.1f}s"
+    return f"cold parallel extract: {n_parts} parts, {n_workers} workers, {time.time() - t0:.1f}s"
+
+
+def _infer_via_daemon(settings: Settings, features_dir: Path, probs_dir: Path, stem: str) -> str:
+    from . import model_pool
+
+    gpus = model_pool.healthy_gpus(settings)
+    task = {
+        "kind": "infer_unet",
+        "gpu": gpus[0],
+        "features_dir": str(features_dir),
+        "stems": [stem],
+        "out_dir": str(probs_dir),
+        "batch": 32,
+    }
+    t0 = time.time()
+    result = model_pool.run_tasks(settings, [task])[0]
+    if result["status"] != "ok":
+        raise PipelineError(f"daemon infer failed: {result['status']} {str(result['detail'])[:500]}")
+    return f"daemon infer: gpu{result['gpu']}, {time.time() - t0:.1f}s, {result['detail']}"
 
 
 def _infer(settings: Settings, features_dir: Path, probs_dir: Path, stem: str) -> str:
     probs_dir.mkdir(parents=True, exist_ok=True)
+    if _daemon_available(settings):
+        try:
+            return _infer_via_daemon(settings, features_dir, probs_dir, stem)
+        except Exception as exc:
+            log.warning("daemon infer failed (%s); falling back to cold subprocess", exc)
     cmd = [
         str(settings.python_bin),
         "scripts/inference/evo2_per_token/infer_shards.py",
@@ -166,7 +275,7 @@ def _infer(settings: Settings, features_dir: Path, probs_dir: Path, stem: str) -
         "--out-dir", str(probs_dir),
         "--stems", stem,
     ]
-    return _run_subprocess(cmd, settings.npmaster_repo_root, stage="infer", python_bin=settings.python_bin)
+    return "cold " + _run_subprocess(cmd, settings.npmaster_repo_root, stage="infer", python_bin=settings.python_bin)
 
 
 def _use_precomputed_probs(settings: Settings, probs_dir: Path, *, genome_name: str, stem: str) -> bool:
@@ -676,9 +785,12 @@ def _process_genome(supa: Any, settings: Settings, job: dict[str, Any], genome: 
             cache_hit = False
 
         if not cache_hit:
-            update_job(supa, job_id, log_tail=f"{genome_name}: 等待 GPU（Evo2 特征提取）")
-            if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
-                raise GpuBusyTimeout("gpu busy timeout before extract")
+            # The VRAM guard only makes sense for the cold-start path; resident
+            # daemons legitimately hold GPU memory between jobs.
+            if not _daemon_available(settings):
+                update_job(supa, job_id, log_tail=f"{genome_name}: 等待 GPU（Evo2 特征提取）")
+                if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
+                    raise GpuBusyTimeout("gpu busy timeout before extract")
             update_job(supa, job_id, log_tail=f"{genome_name}: 提取 Evo2 特征")
             try:
                 _extract(settings, fasta_path, features_dir, stem)
@@ -696,9 +808,10 @@ def _process_genome(supa: Any, settings: Settings, job: dict[str, Any], genome: 
         else:
             log.info("feature cache hit for %s", sha[:8])
 
-        update_job(supa, job_id, log_tail=f"{genome_name}: 等待 GPU（U-Net 推理）")
-        if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
-            raise GpuBusyTimeout("gpu busy timeout before U-Net inference")
+        if not _daemon_available(settings):
+            update_job(supa, job_id, log_tail=f"{genome_name}: 等待 GPU（U-Net 推理）")
+            if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
+                raise GpuBusyTimeout("gpu busy timeout before U-Net inference")
         update_job(supa, job_id, log_tail=f"{genome_name}: 运行 U-Net 推理")
         _infer(settings, features_dir, probs_dir, stem)
 

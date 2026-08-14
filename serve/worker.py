@@ -125,6 +125,16 @@ def main() -> int:
     supa = make_client(settings)
     log.info("worker %s starting; repo=%s cache=%s", settings.worker_id, settings.npmaster_repo_root, settings.npmaster_cache_dir)
 
+    if settings.model_daemon_enabled:
+        try:
+            from . import model_pool
+
+            n_healthy = model_pool.ensure_daemons(settings)
+            log.info("model daemon pool: %d/%d daemons healthy",
+                     n_healthy, len(model_pool.configured_gpus(settings)))
+        except Exception as e:
+            log.warning("model daemon pool setup failed (%s); jobs will use the cold-start path", e)
+
     _install_signal_handlers()
 
     while not _shutdown.is_set():
