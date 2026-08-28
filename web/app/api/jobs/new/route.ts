@@ -1,10 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServiceRoleClient, getOptionalUser } from "@/lib/supabase/server";
 import { JobCreate } from "@/lib/schemas";
-
-const ANON_MAX_BYTES = 10 * 1024 * 1024;
-const AUTH_MAX_BYTES = 50 * 1024 * 1024;
-const AUTH_MAX_FILES = 64;
+import { ANON_MAX_FILES, AUTH_MAX_FILES, FASTA_MAX_BYTES, formatBytes } from "@/lib/limits";
 
 export async function POST(request: NextRequest) {
   const raw = await request.json().catch(() => null);
@@ -18,18 +15,17 @@ export async function POST(request: NextRequest) {
   if (!user && !input.clientId) {
     return NextResponse.json({ error: "匿名提交缺少浏览器标识" }, { status: 400 });
   }
-  if (!user && input.genomes.length > 1) {
+  if (!user && input.genomes.length > ANON_MAX_FILES) {
     return NextResponse.json({ error: "匿名模式一次只能提交一个 FASTA" }, { status: 403 });
   }
   if (user && input.genomes.length > AUTH_MAX_FILES) {
     return NextResponse.json({ error: `批量任务最多支持 ${AUTH_MAX_FILES} 个 FASTA 文件` }, { status: 413 });
   }
 
-  const cap = user ? AUTH_MAX_BYTES : ANON_MAX_BYTES;
-  const tooLarge = input.genomes.find((g) => g.bytes > cap);
+  const tooLarge = input.genomes.find((g) => g.bytes > FASTA_MAX_BYTES);
   if (tooLarge) {
     return NextResponse.json({
-      error: `${tooLarge.filename} 为 ${(tooLarge.bytes / 1024 / 1024).toFixed(1)} MB，限制为 ${(cap / 1024 / 1024).toFixed(0)} MB。`,
+      error: `${tooLarge.filename} 为 ${formatBytes(tooLarge.bytes)}，限制为 ${formatBytes(FASTA_MAX_BYTES)}。`,
     }, { status: 413 });
   }
 

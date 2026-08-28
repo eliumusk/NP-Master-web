@@ -6,11 +6,7 @@ import { getOrCreateClientId } from "@/lib/clientId";
 import { sha256OfBlob, sniffFasta } from "@/lib/fasta";
 import { sniffGff3 } from "@/lib/gff3";
 import { useI18n } from "@/lib/i18n/client";
-
-const ANON_MAX_BYTES = 10 * 1024 * 1024;
-const AUTH_MAX_BYTES = 50 * 1024 * 1024;
-const AUTH_MAX_FILES = 64;
-const GFF3_MAX_BYTES = 20 * 1024 * 1024;
+import { ANON_MAX_FILES, AUTH_MAX_FILES, FASTA_MAX_BYTES, GFF3_MAX_BYTES, formatBytes } from "@/lib/limits";
 
 type Phase = "idle" | "hashing" | "creating" | "uploading" | "queueing" | "error";
 
@@ -62,8 +58,8 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
   const [safeTierMin, setSafeTierMin] = useState("Tier2");
   const [notifyEmail, setNotifyEmail] = useState(true);
 
-  const maxBytes = isLoggedIn ? AUTH_MAX_BYTES : ANON_MAX_BYTES;
-  const maxFiles = isLoggedIn ? AUTH_MAX_FILES : 1;
+  const maxBytes = FASTA_MAX_BYTES;
+  const maxFiles = isLoggedIn ? AUTH_MAX_FILES : ANON_MAX_FILES;
   const busy = phase !== "idle" && phase !== "error";
   const validFiles = useMemo(() => files.filter((f) => f.ok !== false), [files]);
   const singleFile = files.length === 1 ? files[0] : null;
@@ -78,13 +74,13 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
       if (file.size > maxBytes) {
         item.ok = false;
         item.message = t.submit.errTooLarge(
-          (file.size / 1024 / 1024).toFixed(1),
-          (maxBytes / 1024 / 1024).toFixed(0),
+          formatBytes(file.size),
+          formatBytes(maxBytes),
         );
       } else {
         const sniff = await sniffFasta(file);
         item.ok = sniff.ok;
-        item.message = sniff.ok ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : sniff.reason;
+        item.message = sniff.ok ? formatBytes(file.size) : sniff.reason;
       }
       next.push(item);
     }

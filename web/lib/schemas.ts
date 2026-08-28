@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FASTA_MAX_BYTES, GFF3_MAX_BYTES } from "@/lib/limits";
 
 export const TIER_ORDER = ["Tier1", "Tier2", "Tier3", "Tier4", "Tier5"] as const;
 
@@ -6,11 +7,11 @@ export const GenomeUpload = z.object({
   filename: z.string().min(1).max(256),
   genomeName: z.string().min(1).max(160),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
-  bytes: z.number().int().positive().max(50 * 1024 * 1024),
+  bytes: z.number().int().positive().max(FASTA_MAX_BYTES),
   gff3: z.object({
     filename: z.string().min(1).max(256),
     sha256: z.string().regex(/^[0-9a-f]{64}$/),
-    bytes: z.number().int().positive().max(20 * 1024 * 1024),
+    bytes: z.number().int().positive().max(GFF3_MAX_BYTES),
   }).optional(),
 });
 
