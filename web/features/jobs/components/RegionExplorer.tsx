@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n/client";
 import { ALL_FILTER, EVIDENCE_CHIP, bgcTypeMeta } from "../constants";
-import { formatRange, formatScore } from "../format";
+import { formatRange } from "../format";
 import { evidenceKey, extendedLength, seedGeneOf } from "../stats";
 import type { Region, RegionFilters } from "../types";
 
@@ -37,15 +37,31 @@ export function RegionExplorer({
             {t.explorer.showing} <span className="numeric-display font-medium text-fg">{regions.length}</span>
             <span className="text-fg-subtle"> {t.explorer.of} {allRegions.length}</span> {t.explorer.regionsUnit}
           </p>
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-fg-muted transition-colors duration-150 hover:text-fg">
-            <input
-              type="checkbox"
-              checked={filters.safeOnly}
-              onChange={(event) => onFiltersChange({ ...filters, safeOnly: event.target.checked })}
-              className="checkbox"
-            />
-            {t.explorer.safeOnly}
-          </label>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <label className="flex items-center gap-2 text-xs text-fg-muted">
+              {t.explorer.sortLabel}
+              <select
+                value={filters.sort}
+                onChange={(event) => onFiltersChange({ ...filters, sort: event.target.value as RegionFilters["sort"] })}
+                className="h-8 rounded-btn border border-white/[0.08] bg-white/[0.02] px-2 text-xs text-fg outline-none transition-colors focus:border-brand/60"
+              >
+                <option value="position">{t.explorer.sortPosition}</option>
+                <option value="evidence">{t.explorer.sortEvidence}</option>
+              </select>
+            </label>
+            <label
+              title={t.explorer.safeOnlyTip}
+              className="flex cursor-pointer items-center gap-2 text-xs text-fg-muted transition-colors duration-150 hover:text-fg"
+            >
+              <input
+                type="checkbox"
+                checked={filters.safeOnly}
+                onChange={(event) => onFiltersChange({ ...filters, safeOnly: event.target.checked })}
+                className="checkbox"
+              />
+              {t.explorer.safeOnly}
+            </label>
+          </div>
         </div>
 
         <div className="mt-3 grid gap-2 md:grid-cols-[1fr,1fr,1fr,1.6fr]">
@@ -94,8 +110,7 @@ export function RegionExplorer({
                 <th className="px-3 py-2.5 text-right font-medium">{t.explorer.colSpan}</th>
                 <th className="px-3 py-2.5 text-right font-medium">{t.explorer.colLen}</th>
                 <th className="px-3 py-2.5 font-medium">{t.explorer.colType}</th>
-                <th className="px-3 py-2.5 text-right font-medium">{t.explorer.colScore}</th>
-                <th className="px-3 py-2.5 font-medium">{t.explorer.colEvidence}</th>
+                <th className="px-3 py-2.5 font-medium" title={t.explorer.evidenceTip}>{t.explorer.colEvidence}</th>
                 <th className="px-3 py-2.5 font-medium">{t.explorer.colSeed}</th>
                 <th className="px-3 py-2.5 font-medium">{t.explorer.colMibig}</th>
               </tr>
@@ -169,7 +184,6 @@ function RegionRow({
           <span className="min-w-0 truncate text-fg-muted">{typeMeta.label}</span>
         </span>
       </td>
-      <td className="numeric-display px-3 py-3 text-right text-xs text-fg">{formatScore(region.score)}</td>
       <td className="px-3 py-3">
         <span className={`inline-flex items-center rounded-pill px-2 py-0.5 text-micro font-medium ${EVIDENCE_CHIP[evidenceKey(region)]}`}>
           {evidenceLabel}

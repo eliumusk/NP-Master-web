@@ -1,5 +1,5 @@
 import { ALL_FILTER } from "./constants";
-import type { Region, RegionFilters } from "./types";
+import type { CdsFeature, Region, RegionFilters, RegionSortMode } from "./types";
 
 export function extendedLength(region: Region) {
   if (region.ext_start_bp == null || region.ext_end_bp == null) return null;
@@ -46,7 +46,7 @@ export function assignBgcIds(
   return map;
 }
 
-/** Evidence bucket used for the 证据 column and default sort. */
+/** Evidence bucket used for the 证据 column and the evidence sort mode. */
 export function evidenceKey(region: Region): "tier1" | "tier2" | "tier3" | "tier4" | "tier5" | "none" {
   const tier = region.safe_tier || "";
   if (tier.startsWith("Tier1")) return "tier1";
@@ -62,11 +62,37 @@ export function evidenceRank(region: Region) {
   return order[evidenceKey(region)];
 }
 
-/** Default ordering: evidence rating first, then detection score. */
-export function sortRegionsForTable(regions: Region[]): Region[] {
+/**
+ * Table ordering. "position" (default) follows the BGC numbering assigned by
+ * assignBgcIds (genome → contig → start); "evidence" ranks by evidence rating
+ * first, then detection score.
+ */
+export function sortRegionsForTable(regions: Region[], mode: RegionSortMode = "position"): Region[] {
+  if (mode === "evidence") {
+    return [...regions].sort((a, b) =>
+      evidenceRank(a) - evidenceRank(b) || b.score - a.score,
+    );
+  }
   return [...regions].sort((a, b) =>
-    evidenceRank(a) - evidenceRank(b) || b.score - a.score,
+    a.genome_name.localeCompare(b.genome_name)
+    || a.contig.localeCompare(b.contig)
+    || a.start_bp - b.start_bp,
   );
+}
+
+/**
+ * Display name for a CDS function. Prodigal-annotated runs have no real
+ * product names ("hypothetical protein"), so fall back to the name of the
+ * highest-bitscore Pfam domain (flagged as a prediction). null = nothing known.
+ */
+export function cdsDisplayFunction(cds: CdsFeature): { text: string; pfamPredicted: boolean } | null {
+  const product = (cds.product ?? "").trim();
+  if (product && !/hypothetical/i.test(product)) return { text: product, pfamPredicted: false };
+  const top = (cds.pfam_domains ?? [])
+    .filter((d) => (d.name ?? "").trim())
+    .sort((a, b) => Number(b.bitscore ?? 0) - Number(a.bitscore ?? 0))[0];
+  if (top) return { text: (top.name ?? "").trim(), pfamPredicted: true };
+  return null;
 }
 
 /** Representative seed gene: first core-biosynthetic CDS (product or locus). */

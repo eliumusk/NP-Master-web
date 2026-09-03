@@ -2,13 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n/client";
-import { functionClassMeta } from "../constants";
+import { FUNCTION_CLASS_COLORS, functionClassColor, functionClassMeta } from "../constants";
 import { formatBp } from "../format";
+import { cdsDisplayFunction } from "../stats";
 import type { CdsFeature, Region } from "../types";
 
-// antiSMASH-style gene map: single centre lane, direction arrows, solid class
-// colours with darker rims, gene labels when space allows, adaptive ruler.
-// Laid out in real pixels (ResizeObserver) so text and strokes stay crisp.
+// antiSMASH-style gene map: single centre lane, direction arrows coloured by
+// functional class (click to select), gene labels when space allows, adaptive
+// ruler. Laid out in real pixels (ResizeObserver) so text and strokes stay
+// crisp. SVG fills use literal hex values, not Tailwind classes.
 
 const H = 128;
 const LANE_Y = 56;      // centre of the gene lane
@@ -17,7 +19,18 @@ const HEAD = 7;         // arrowhead px
 const RULER_Y = 96;
 const PAD = 10;
 
-export function GeneTrack({ region }: { region: Region }) {
+export function GeneTrack({
+  region,
+  cdsList,
+  selectedIndex,
+  onSelect,
+}: {
+  region: Region;
+  /** Filtered CDS list owned by the parent, so arrow indexes match the CDS table. */
+  cdsList: CdsFeature[];
+  selectedIndex: number | null;
+  onSelect: (index: number | null) => void;
+}) {
   const { t, locale } = useI18n();
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -32,10 +45,6 @@ export function GeneTrack({ region }: { region: Region }) {
     return () => ro.disconnect();
   }, []);
 
-  const cdsList = (region.cds_features ?? []).filter(
-    (cds) => Number(cds.end ?? 0) > Number(cds.start ?? 0),
-  );
-
   if (cdsList.length === 0) return null;
 
   const coreLen = region.end_bp - region.start_bp;
@@ -48,7 +57,14 @@ export function GeneTrack({ region }: { region: Region }) {
   const innerW = Math.max(0, width - PAD * 2);
   const x = (bp: number) => PAD + ((bp - minBp) / span) * innerW;
 
-  const hasBiosynthetic = cdsList.some((c) => (c.function_class || "").includes("biosynthetic"));
+  // Legend lists the functional classes actually present (unknown classes
+  // resolve to "other", same fallback as functionClassColor).
+  const legendClasses = Object.keys(FUNCTION_CLASS_COLORS).filter((cls) =>
+    cdsList.some((c) => {
+      const fc = c.function_class || "other";
+      return (fc in FUNCTION_CLASS_COLORS ? fc : "other") === cls;
+    }),
+  );
   const ticks = width > 0 ? rulerTicks(minBp, maxBp, innerW) : [];
 
   return (
@@ -94,7 +110,16 @@ export function GeneTrack({ region }: { region: Region }) {
             />
 
             {cdsList.map((cds, i) => (
-              <GeneArrow key={`${cds.locus_tag ?? "cds"}-${i}`} cds={cds} x={x} locale={locale} hypothetical={t.detail.hypothetical} />
+              <GeneArrow
+                key={`${cds.locus_tag ?? "cds"}-${i}`}
+                cds={cds}
+                x={x}
+                locale={locale}
+                hypothetical={t.detail.hypothetical}
+                pfamNote={t.region.pfamPredicted}
+                selected={selectedIndex === i}
+                onSelect={() => onSelect(selectedIndex === i ? null : i)}
+              />
             ))}
 
             {/* ruler */}
@@ -122,12 +147,15 @@ export function GeneTrack({ region }: { region: Region }) {
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-micro text-fg-muted">
-        {hasBiosynthetic && (
-          <span className="inline-flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-[2px] bg-brand/30 ring-1 ring-inset ring-brand/60" />
-            {t.detail.legendBiosynth}
+        {legendClasses.map((cls) => (
+          <span key={cls} className="inline-flex items-center gap-1.5">
+            <span
+              className="inline-block h-2.5 w-2.5 rounded-[2px]"
+              style={{ backgroundColor: functionClassColor(cls), opacity: 0.5 }}
+            />
+            {functionClassMeta(cls, locale).label}
           </span>
-        )}
+        ))}
         <span className="inline-flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded-[2px] border border-white/40 bg-white/35" />
           {t.detail.pfamDomain}
@@ -145,11 +173,17 @@ function GeneArrow({
   x,
   locale,
   hypothetical,
+  pfamNote,
+  selected,
+  onSelect,
 }: {
   cds: CdsFeature;
   x: (bp: number) => number;
   locale: "zh" | "en";
   hypothetical: string;
+  pfamNote: string;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   const start = Number(cds.start ?? 0);
   const end = Number(cds.end ?? 0);
@@ -158,10 +192,9 @@ function GeneArrow({
   const x2 = x(end);
   const w = Math.max(2, x2 - x1);
   const fc = cds.function_class || "other";
-  // Muted track: one quiet gray for all genes, brand teal only for
-  // biosynthetic (synthase) genes — the point of a BGC region view.
-  const biosynthetic = fc.includes("biosynthetic");
-  const fill = biosynthetic ? "rgb(var(--brand))" : "rgb(var(--fg))";
+  // Arrows are coloured by functional class; the selected gene gets a denser
+  // fill and a solid rim so it stands out from its neighbours.
+  const color = functionClassColor(fc);
 
   const y = LANE_Y - GENE_H / 2;
   const head = Math.min(HEAD, w * 0.4);
@@ -181,11 +214,13 @@ function GeneArrow({
 
   const label = cds.locus_tag || "";
   const showLabel = label && w > 88 && Math.floor(w / 6.5) >= 8;
+  const fn = cdsDisplayFunction(cds);
+  const fnLabel = fn ? `${fn.text}${fn.pfamPredicted ? ` ${pfamNote}` : ""}` : hypothetical;
 
   return (
-    <g className="cursor-default transition-opacity hover:opacity-85">
-      <polygon points={pts} fill={fill} fillOpacity={biosynthetic ? 0.3 : 0.1} stroke={fill} strokeOpacity={biosynthetic ? 0.7 : 0.3} strokeWidth={1}>
-        <title>{`${label || "CDS"} · ${cds.product || hypothetical}\n${start}–${end} bp (${strand < 0 ? "−" : "+"}) · ${functionClassMeta(fc, locale).label}`}</title>
+    <g className="cursor-pointer transition-opacity hover:opacity-85" onClick={onSelect}>
+      <polygon points={pts} fill={color} fillOpacity={selected ? 0.7 : 0.35} stroke={color} strokeOpacity={selected ? 1 : 0.7} strokeWidth={selected ? 1.5 : 1}>
+        <title>{`${label || "CDS"} · ${fnLabel}\n${start}–${end} bp (${strand < 0 ? "−" : "+"}) · ${functionClassMeta(fc, locale).label}`}</title>
       </polygon>
       {/* pfam domains: subtle light insets centred on the arrow body */}
       {domains.map((d, j) => {

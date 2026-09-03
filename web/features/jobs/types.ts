@@ -91,10 +91,13 @@ export type JobWorkspacePayload = {
   isLoggedIn: boolean;
 };
 
+export type RegionSortMode = "position" | "evidence";
+
 export type RegionFilters = {
   safeOnly: boolean;
   contig: string;
   bgcType: string;
   tier: string;
   query: string;
+  sort: RegionSortMode;
 };

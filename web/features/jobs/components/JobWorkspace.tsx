@@ -27,11 +27,12 @@ export function JobWorkspace({
   const [regions, setRegions] = useState(initialRegions);
   const [artifacts, setArtifacts] = useState(initialArtifacts);
   const [filters, setFilters] = useState<RegionFilters>({
-    safeOnly: true,
+    safeOnly: false,
     contig: ALL_FILTER,
     bgcType: ALL_FILTER,
     tier: ALL_FILTER,
     query: "",
+    sort: "position",
   });
 
   useEffect(() => {
@@ -58,7 +59,7 @@ export function JobWorkspace({
 
   const bgcIds = useMemo(() => assignBgcIds(regions), [regions]);
   const tableRegions = useMemo(
-    () => sortRegionsForTable(filterRegions(regions, filters, bgcIds)),
+    () => sortRegionsForTable(filterRegions(regions, filters, bgcIds), filters.sort),
     [regions, filters, bgcIds],
   );
   const summaryUrl = useMemo(

@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SignedJobArtifact } from "@/lib/job-artifacts";
 import { useI18n } from "@/lib/i18n/client";
 import { EVIDENCE_CHIP, bgcTypeMeta, functionClassColor, functionClassMeta } from "../constants";
 import { formatBp, formatPercent, formatRange, formatScore } from "../format";
-import { evidenceKey, extendedLength, seedGeneOf } from "../stats";
+import { cdsDisplayFunction, evidenceKey, extendedLength, seedGeneOf } from "../stats";
 import type { CdsFeature, PfamDomain, Region } from "../types";
 import { FeedbackBox } from "./FeedbackBox";
 import { GeneTrack } from "./GeneTrack";
@@ -35,7 +36,14 @@ export function RegionDetailView({
   const extLen = extendedLength(region);
   const spanStart = region.ext_start_bp ?? region.start_bp;
   const spanEnd = region.ext_end_bp ?? region.end_bp;
-  const cdsList = region.cds_features ?? [];
+  // Degenerate CDS rows (end <= start) cannot be drawn on the gene track, so
+  // they are dropped here once — the gene map, this table and the detail card
+  // all share the same array and therefore the same indexes.
+  const cdsList = (region.cds_features ?? []).filter(
+    (cds) => Number(cds.end ?? 0) > Number(cds.start ?? 0),
+  );
+  const [selectedCds, setSelectedCds] = useState<number | null>(null);
+  const selected = selectedCds != null && selectedCds < cdsList.length ? cdsList[selectedCds] : null;
   const dnaArtifact = genomeArtifacts.find((a) => a.kind === "extended_regions_fna");
 
   return (
@@ -76,10 +84,25 @@ export function RegionDetailView({
         </p>
       </div>
 
-      {/* ── 1. gene map ────────────────────────────────────── */}
+      {/* ── 1. gene map + selected-gene panel ──────────────── */}
       <section className="panel p-5">
         <h2 className="text-sm font-semibold">{t.region.track}</h2>
-        <GeneTrack region={region} />
+        <div className="lg:flex lg:items-start lg:gap-5">
+          <div className="min-w-0 flex-1">
+            <GeneTrack region={region} cdsList={cdsList} selectedIndex={selectedCds} onSelect={setSelectedCds} />
+          </div>
+          {cdsList.length > 0 && (
+            <div className="mt-4 lg:mt-3 lg:w-80 lg:shrink-0">
+              {selected != null && selectedCds != null ? (
+                <CdsDetailCard cds={selected} index={selectedCds} onClose={() => setSelectedCds(null)} />
+              ) : (
+                <p className="rounded-btn border border-dashed border-white/[0.08] px-3 py-2.5 text-xs text-fg-subtle">
+                  {t.region.selectGeneHint}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       </section>
 
       {/* ── 2. gene / CDS overview ─────────────────────────── */}
@@ -100,29 +123,37 @@ export function RegionDetailView({
                 </tr>
               </thead>
               <tbody>
-                {cdsList.map((cds, i) => (
-                  <tr key={`${cds.locus_tag ?? "cds"}-${i}`} className="border-b border-white/[0.06] transition-colors last:border-0 hover:bg-white/[0.03]">
-                    <td className="px-3 py-2 font-mono text-fg">{cds.locus_tag || `cds_${i + 1}`}</td>
-                    <td className="max-w-[18rem] px-3 py-2">
-                      <span className="block truncate text-fg-muted" title={cds.product || ""}>{cds.product || "-"}</span>
-                    </td>
-                    <td className="numeric-display px-3 py-2 text-right text-fg-muted">
-                      {formatBp(Math.max(0, Number(cds.end ?? 0) - Number(cds.start ?? 0)))}
-                    </td>
-                    <td className="numeric-display px-3 py-2 text-right text-fg-muted">
-                      {cds.length_aa != null ? `${cds.length_aa} aa` : "-"}
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className="flex items-center gap-2">
-                        <span
-                          className="h-1.5 w-1.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: functionClassColor(cds.function_class) }}
-                        />
-                        <span className="truncate text-fg-muted">{functionClassMeta(cds.function_class, locale).label}</span>
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {cdsList.map((cds, i) => {
+                  const fn = cdsDisplayFunction(cds);
+                  const fnText = fn ? `${fn.text}${fn.pfamPredicted ? ` ${t.region.pfamPredicted}` : ""}` : "-";
+                  return (
+                    <tr
+                      key={`${cds.locus_tag ?? "cds"}-${i}`}
+                      onClick={() => setSelectedCds(selectedCds === i ? null : i)}
+                      className={`cursor-pointer border-b border-white/[0.06] transition-colors last:border-0 hover:bg-white/[0.03] ${selectedCds === i ? "bg-brand/[0.08]" : ""}`}
+                    >
+                      <td className="px-3 py-2 font-mono text-fg">{cds.locus_tag || `cds_${i + 1}`}</td>
+                      <td className="max-w-[18rem] px-3 py-2">
+                        <span className="block truncate text-fg-muted" title={fn ? fn.text : ""}>{fnText}</span>
+                      </td>
+                      <td className="numeric-display px-3 py-2 text-right text-fg-muted">
+                        {formatBp(Math.max(0, Number(cds.end ?? 0) - Number(cds.start ?? 0)))}
+                      </td>
+                      <td className="numeric-display px-3 py-2 text-right text-fg-muted">
+                        {cds.length_aa != null ? `${cds.length_aa} aa` : "-"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="flex items-center gap-2">
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: functionClassColor(cds.function_class) }}
+                          />
+                          <span className="truncate text-fg-muted">{functionClassMeta(cds.function_class, locale).label}</span>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -338,6 +369,133 @@ function EvidenceMeta({ label, value, mono }: { label: string; value: string; mo
       <div className={`mt-0.5 truncate text-small font-medium text-fg ${mono ? "font-mono" : numeric ? "numeric-display" : ""}`}>{value}</div>
     </div>
   );
+}
+
+/* ── selected-CDS detail card (antiSMASH-style side panel) ── */
+
+function CdsDetailCard({ cds, index, onClose }: { cds: CdsFeature; index: number; onClose: () => void }) {
+  const { t, locale } = useI18n();
+  const fn = cdsDisplayFunction(cds);
+  const classMeta = functionClassMeta(cds.function_class, locale);
+  const start = Number(cds.start ?? 0);
+  const end = Number(cds.end ?? 0);
+  const strand = Number(cds.strand ?? 1);
+  const domains = [...(cds.pfam_domains ?? [])].sort((a, b) => Number(b.bitscore ?? 0) - Number(a.bitscore ?? 0));
+
+  return (
+    <div className="rounded-btn border border-white/[0.08] bg-white/[0.02] p-4">
+      <div className="flex items-start justify-between gap-2">
+        <span className="min-w-0 truncate font-mono text-sm font-semibold text-fg">{cds.locus_tag || `cds_${index + 1}`}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="×"
+          className="shrink-0 rounded-btn px-1.5 text-sm leading-5 text-fg-subtle transition-colors hover:text-fg"
+        >
+          ×
+        </button>
+      </div>
+      <div className="mt-1.5">
+        <span className={`inline-flex rounded-pill px-2 py-0.5 text-micro font-medium ${classMeta.className}`}>
+          {classMeta.label}
+        </span>
+      </div>
+
+      <dl className="mt-3 space-y-2 text-xs">
+        <CardRow label={t.region.cardFunction} title={fn?.text}>
+          {fn ? `${fn.text}${fn.pfamPredicted ? ` ${t.region.pfamPredicted}` : ""}` : "-"}
+        </CardRow>
+        <CardRow label={t.region.cardLocation}>
+          <span className="font-mono">{formatRange(start, end)} ({strand < 0 ? "−" : "+"})</span>
+        </CardRow>
+        <CardRow label={t.region.colCdsLen}>{formatBp(Math.max(0, end - start))}</CardRow>
+        <CardRow label={t.region.colAaLen}>{cds.length_aa != null ? `${cds.length_aa} aa` : "-"}</CardRow>
+      </dl>
+
+      <div className="mt-3 border-t border-white/[0.06] pt-3">
+        <div className="text-micro uppercase tracking-wider text-fg-subtle">{t.region.cardPfam}</div>
+        {domains.length === 0 ? (
+          <div className="mt-1.5 text-xs text-fg-subtle">{t.region.noPfam}</div>
+        ) : (
+          <ul className="mt-1.5 space-y-1.5">
+            {domains.map((d, i) => (
+              <li key={`${d.accession ?? d.name ?? "dom"}-${i}`} className="rounded-btn border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-micro">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-fg" title={d.name || ""}>{d.name || "-"}</span>
+                  <span className="shrink-0 font-mono text-fg-subtle">{d.accession || "-"}</span>
+                </div>
+                <div className="numeric-display mt-0.5 text-fg-subtle">
+                  E={d.e_value == null ? "-" : Number(d.e_value).toExponential(1)} · bits {formatScore(d.bitscore, 1)}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="mt-3 grid gap-2">
+        <CopySeqButton label={t.region.copyAa} copiedLabel={t.region.copied} seq={cds.aa_sequence} />
+        <CopySeqButton label={t.region.copyNt} copiedLabel={t.region.copied} seq={cds.nt_sequence} />
+      </div>
+    </div>
+  );
+}
+
+function CardRow({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="shrink-0 text-fg-subtle">{label}</dt>
+      <dd className="min-w-0 truncate text-right text-fg" title={title}>{children}</dd>
+    </div>
+  );
+}
+
+function CopySeqButton({ label, copiedLabel, seq }: { label: string; copiedLabel: string; seq: string | null | undefined }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  const disabled = !seq;
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={async () => {
+        if (!seq) return;
+        if (await copyText(seq)) {
+          setCopied(true);
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => setCopied(false), 1500);
+        }
+      }}
+      className={seqBtnClass(disabled)}
+    >
+      {copied ? copiedLabel : label}
+    </button>
+  );
+}
+
+/** Clipboard copy with a textarea fallback for non-secure contexts. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
 }
 
 function flattenDomains(cdsFeatures: CdsFeature[]) {
