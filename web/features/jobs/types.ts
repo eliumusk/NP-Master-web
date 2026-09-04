@@ -37,6 +37,8 @@ export type MibigHit = {
   bgc_id?: string;
   identity?: number;
   product?: string;
+  /** Cluster-level compound name from mibig_clusters.json (e.g. "actinorhodin"). */
+  cluster_product?: string;
 };
 
 export type PfamDomain = {

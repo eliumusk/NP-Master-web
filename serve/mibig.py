@@ -5,11 +5,18 @@ One-time setup (run once when MIBiG is updated):
         --gbk-dir /data/syh/NP-Master-web/data/mibig/mibig_gbk_4.0 \
         --out-dir /data/syh/NP-Master-web/data/mibig
 
+To regenerate only the cluster-level product meta (mibig_clusters.json)
+without rebuilding the DIAMOND index:
+    python -m serve.mibig clusters \
+        --gbk-dir /data/syh/NP-Master-web/data/mibig/mibig_gbk_4.0 \
+        --out-json /data/syh/NP-Master-web/data/mibig/mibig_clusters.json
+
 At job time:
     from serve.mibig import search_regions_against_mibig
     hits_by_region = search_regions_against_mibig(regions_gbk, dmnd_db, top_k=3)
 
-Output is a list per region of dicts: {bgc_id, identity, evalue, product, query_cds}.
+Output is a list per region of dicts: {bgc_id, identity, evalue, product,
+cluster_product, query_cds}.
 """
 from __future__ import annotations
 
@@ -89,6 +96,94 @@ def build_diamond_db(faa: Path, dmnd: Path, diamond_bin: Path, threads: int = 8)
         raise RuntimeError(f"diamond makedb failed:\n{proc.stderr[-2000:]}")
 
 
+# Matches "angolamycin biosynthesis gene cluster" style cluster annotations.
+_CLUSTER_RE = re.compile(r"^(.{1,60}?)\s+biosynth(?:esis|etic)\s+gene\s+cluster\b", re.IGNORECASE)
+# Compound names never contain these; their presence means the capture bled
+# into neighbouring prose (e.g. "EMBL:X58833.1 S.coelicolor 6 actVA region ...").
+_CLUSTER_BAD_CHARS = re.compile(r"[.:;,]")
+
+
+def _cluster_product_from_record(rec, organism: str) -> str:
+    """Cluster-level compound name from misc_feature notes, else DEFINITION."""
+    for feat in rec.features:
+        if feat.type != "misc_feature":
+            continue
+        for note in feat.qualifiers.get("note", []):
+            m = _CLUSTER_RE.match(str(note).strip())
+            if m and not _CLUSTER_BAD_CHARS.search(m.group(1)):
+                return m.group(1).strip()
+    definition = (rec.description or "").strip()
+    if organism and definition.lower().startswith(organism.lower()):
+        definition = definition[len(organism):].strip()
+    m = _CLUSTER_RE.match(definition)
+    if m and not _CLUSTER_BAD_CHARS.search(m.group(1)):
+        return m.group(1).strip()
+    return ""
+
+
+def _load_mibig_json_meta(json_dir: Path) -> dict[str, dict]:
+    """Read MIBiG 4.0 per-entry JSONs: {bgc_id: {product, organism, classes}}."""
+    meta: dict[str, dict] = {}
+    for js in sorted(Path(json_dir).glob("BGC*.json")):
+        try:
+            d = json.loads(js.read_text())
+        except Exception as e:
+            log.warning("json parse failed %s: %s", js.name, e)
+            continue
+        compounds = [str(c.get("name") or "").strip() for c in d.get("compounds") or []]
+        compounds = [c for c in compounds if c]
+        classes: list[str] = []
+        for cls in (d.get("biosynthesis") or {}).get("classes") or []:
+            name = str((cls or {}).get("class") or "").strip()
+            if name and name not in classes:
+                classes.append(name)
+        meta[js.stem] = {
+            "product": ", ".join(compounds),
+            "organism": str((d.get("taxonomy") or {}).get("name") or ""),
+            "classes": classes,
+        }
+    return meta
+
+
+def extract_cluster_meta(gbk_dir: Path, out_json: Path,
+                         mibig_json_dir: Path | None = None) -> int:
+    """One-time: per MIBiG BGC, extract cluster-level compound + organism.
+
+    Authoritative source is the MIBiG JSON dump (compounds list); the GenBank
+    misc_feature/DEFINITION parse is the fallback for entries without JSON
+    (many early GBKs have no usable cluster note).
+    Output: {bgc_id: {"product": str, "organism": str, "classes": [str]}}.
+    """
+    from Bio import SeqIO
+
+    json_meta = _load_mibig_json_meta(mibig_json_dir) if mibig_json_dir else {}
+    meta: dict[str, dict] = {}
+    for gbk in sorted(Path(gbk_dir).rglob("*.gbk")):
+        bgc_id = gbk.stem
+        organism = ""
+        gbk_product = ""
+        try:
+            rec = next(SeqIO.parse(gbk, "genbank"), None)
+        except Exception as e:
+            log.warning("parse failed %s: %s", gbk.name, e)
+            continue
+        if rec is not None:
+            organism = (rec.annotations or {}).get("organism", "") or ""
+            gbk_product = _cluster_product_from_record(rec, organism)
+        jm = json_meta.get(bgc_id) or {}
+        meta[bgc_id] = {
+            "product": jm.get("product") or gbk_product,
+            "organism": jm.get("organism") or organism,
+            "classes": jm.get("classes") or [],
+        }
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    out_json.write_text(json.dumps(meta))
+    n_named = sum(1 for v in meta.values() if v["product"])
+    log.info("mibig: cluster meta for %d BGCs (%d with compound name) → %s",
+             len(meta), n_named, out_json)
+    return len(meta)
+
+
 def _extract_query_proteins_from_regions_gbk(regions_gbk: Path, out_faa: Path) -> int:
     """Pull all CDS translations out of the per-region GenBank we just generated.
 
@@ -113,12 +208,18 @@ def _extract_query_proteins_from_regions_gbk(regions_gbk: Path, out_faa: Path) -
 def search_regions_against_mibig(*, regions_gbk: Path, dmnd_db: Path,
                                   meta_json: Path, work_dir: Path,
                                   diamond_bin: Path, top_k: int = 3,
-                                  threads: int = 8) -> dict[str, list[dict]]:
+                                  threads: int = 8,
+                                  cluster_meta_json: Path | None = None) -> dict[str, list[dict]]:
     """Run blastp, return {region_name: [hit_dict, ...]} (best-per-region; up to top_k).
 
     Strategy: extract all region CDS as queries, blastp against MIBiG db with
     `-k <large>`, then for each region take the top_k hits across all its CDSs
     (deduplicated by MIBiG bgc_id, ordered by best identity).
+
+    Each hit carries `product` (protein-level annotation of the single best
+    matching MIBiG CDS) and, when the cluster-meta sidecar exists,
+    `cluster_product` (compound name of the whole MIBiG cluster, e.g.
+    "actinorhodin") — the latter is what the UI should surface.
     """
     work_dir.mkdir(parents=True, exist_ok=True)
     query_faa = work_dir / "query_proteins.faa"
@@ -143,6 +244,14 @@ def search_regions_against_mibig(*, regions_gbk: Path, dmnd_db: Path,
         raise RuntimeError(f"diamond blastp failed:\n{proc.stderr[-2000:]}")
 
     meta = json.loads(meta_json.read_text())
+    if cluster_meta_json is None:
+        cluster_meta_json = meta_json.with_name("mibig_clusters.json")
+    cluster_meta: dict[str, dict] = {}
+    if cluster_meta_json.exists():
+        try:
+            cluster_meta = json.loads(cluster_meta_json.read_text())
+        except Exception as e:
+            log.warning("mibig: cluster meta unreadable (%s); continuing without", e)
 
     # Aggregate: for each region, dedupe hits by bgc_id, keep best identity, take top_k.
     by_region: dict[str, dict[str, dict]] = defaultdict(dict)
@@ -173,6 +282,7 @@ def search_regions_against_mibig(*, regions_gbk: Path, dmnd_db: Path,
                 "evalue": evalue_f,
                 "alignment_length": length_i,
                 "product": sub.get("product") or "",
+                "cluster_product": (cluster_meta.get(bgc_id) or {}).get("product") or "",
                 "query_cds": qseq,
             }
 
@@ -193,6 +303,13 @@ def main() -> int:
     p_setup.add_argument("--out-dir", type=Path, required=True)
     p_setup.add_argument("--diamond-bin", type=Path, default=Path("/data/syh/NP-Master-web/data/diamond"))
     p_setup.add_argument("--threads", type=int, default=8)
+    p_setup.add_argument("--mibig-json-dir", type=Path, default=None,
+                         help="MIBiG 4.0 per-entry JSON dump dir (authoritative compounds)")
+    p_clusters = sub.add_parser("clusters", help="regenerate cluster-level product meta only")
+    p_clusters.add_argument("--gbk-dir", type=Path, required=True)
+    p_clusters.add_argument("--out-json", type=Path, required=True)
+    p_clusters.add_argument("--mibig-json-dir", type=Path, default=None,
+                            help="MIBiG 4.0 per-entry JSON dump dir (authoritative compounds)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -203,10 +320,17 @@ def main() -> int:
         faa = out_dir / "mibig_proteins.faa"
         meta = out_dir / "mibig_meta.json"
         dmnd = out_dir / "mibig.dmnd"
+        clusters = out_dir / "mibig_clusters.json"
         n = extract_mibig_proteins(args.gbk_dir, faa, meta)
         print(f"extracted {n} proteins → {faa}")
+        extract_cluster_meta(args.gbk_dir, clusters, mibig_json_dir=args.mibig_json_dir)
+        print(f"cluster meta → {clusters}")
         build_diamond_db(faa, dmnd, args.diamond_bin, args.threads)
         print(f"built {dmnd}")
+        return 0
+    if args.cmd == "clusters":
+        n = extract_cluster_meta(args.gbk_dir, args.out_json, mibig_json_dir=args.mibig_json_dir)
+        print(f"cluster meta for {n} BGCs → {args.out_json}")
         return 0
     return 1
 

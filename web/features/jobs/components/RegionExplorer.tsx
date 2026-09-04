@@ -201,9 +201,12 @@ function RegionRow({
       </td>
       <td className="max-w-[11rem] px-3 py-3 text-xs">
         {topHit?.bgc_id ? (
-          <span className="block truncate font-mono text-fg" title={topHit.product || unknownProduct}>
-            {topHit.bgc_id}
-            {topHit.identity != null && <span className="text-fg-subtle"> · {Math.round(topHit.identity * 100)}%</span>}
+          <span className="block" title={topHit.product || unknownProduct}>
+            <span className="block truncate text-fg">{topHit.cluster_product || topHit.product || unknownProduct}</span>
+            <span className="block truncate font-mono text-micro text-fg-subtle">
+              {topHit.bgc_id}
+              {topHit.identity != null && ` · ${Math.round(topHit.identity * 100)}%`}
+            </span>
           </span>
         ) : (
           <span className="text-fg-subtle">{noHitLabel}</span>

@@ -301,11 +301,16 @@ function MibigPanel({ region }: { region: Region }) {
     return <div className="mt-3 text-sm text-fg-muted">{t.region.noMibig}</div>;
   }
   const best = hits[0];
+  const bestCluster = best.cluster_product || best.product || t.explorer.unknownProduct;
   return (
     <div className="mt-3 space-y-2">
       <div className="grid grid-cols-1 gap-px overflow-hidden rounded-btn border border-white/[0.06] bg-white/[0.06] sm:grid-cols-3">
         <EvidenceMeta label={t.region.mibigBest} value={best.bgc_id || "-"} mono />
-        <EvidenceMeta label={t.region.mibigProduct} value={best.product || t.explorer.unknownProduct} />
+        <EvidenceMeta
+          label={t.region.mibigProduct}
+          value={bestCluster}
+          title={best.cluster_product && best.product ? best.product : undefined}
+        />
         <EvidenceMeta label={t.region.mibigIdentity} value={best.identity == null ? "-" : formatPercent(best.identity)} />
       </div>
       {hits.length > 1 && (
@@ -313,7 +318,9 @@ function MibigPanel({ region }: { region: Region }) {
           {hits.slice(1, 5).map((hit, i) => (
             <div key={`${hit.bgc_id ?? "hit"}-${i}`} className="flex items-center justify-between gap-3 rounded-btn border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-xs">
               <span className="truncate font-mono text-fg">{hit.bgc_id || "-"}</span>
-              <span className="truncate text-fg-subtle">{hit.product || t.explorer.unknownProduct}</span>
+              <span className="truncate text-fg-subtle" title={hit.cluster_product && hit.product ? hit.product : undefined}>
+                {hit.cluster_product || hit.product || t.explorer.unknownProduct}
+              </span>
               <span className="numeric-display shrink-0 text-brand">{hit.identity == null ? "-" : formatPercent(hit.identity)}</span>
             </div>
           ))}
@@ -360,11 +367,11 @@ function DomainTable({ domains }: { domains: Array<PfamDomain & { locusTag: stri
   );
 }
 
-function EvidenceMeta({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function EvidenceMeta({ label, value, mono, title }: { label: string; value: string; mono?: boolean; title?: string }) {
   // Numeric-looking values get tabular figures; text stays in the base font.
   const numeric = /^[\d.,%\-– ]+$/.test(value);
   return (
-    <div className="min-w-0 bg-surface px-3 py-2.5">
+    <div className="min-w-0 bg-surface px-3 py-2.5" title={title}>
       <div className="text-micro text-fg-subtle">{label}</div>
       <div className={`mt-0.5 truncate text-small font-medium text-fg ${mono ? "font-mono" : numeric ? "numeric-display" : ""}`}>{value}</div>
     </div>
