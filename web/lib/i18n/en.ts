@@ -170,6 +170,7 @@ export const en: Dictionary = {
     sortLabel: "Sort",
     sortPosition: "Genomic position",
     sortEvidence: "Evidence first",
+    groupSafe: "priority",
     allGenomes: "All genomes",
     allContigs: "All contigs",
     allTypes: "All types",

@@ -168,6 +168,7 @@ export const zh = {
     sortLabel: "排序",
     sortPosition: "基因组位置",
     sortEvidence: "证据优先",
+    groupSafe: "个优先验证",
     allGenomes: "全部基因组",
     allContigs: "全部 Contig",
     allTypes: "全部类型",

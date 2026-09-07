@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Fragment } from "react";
 import { useI18n } from "@/lib/i18n/client";
 import { ALL_FILTER, EVIDENCE_CHIP, bgcTypeMeta } from "../constants";
 import { formatRange } from "../format";
@@ -27,6 +28,15 @@ export function RegionExplorer({
   const multiGenome = new Set(allRegions.map((r) => r.genome_name)).size > 1;
   const types = uniqueSorted(allRegions.map((r) => r.bgc_type || "Other"));
   const evidenceKeys = uniqueSortedKeys(allRegions);
+  // Group rows by genome (first-appearance order follows the active sort), so
+  // multi-genome jobs never look like one mixed pool of regions.
+  const groupMap = new Map<string, Region[]>();
+  for (const region of regions) {
+    const arr = groupMap.get(region.genome_name);
+    if (arr) arr.push(region);
+    else groupMap.set(region.genome_name, [region]);
+  }
+  const genomeGroups = [...groupMap.entries()];
 
   return (
     <section className="panel min-w-0 overflow-hidden">
@@ -116,18 +126,36 @@ export function RegionExplorer({
               </tr>
             </thead>
             <tbody>
-              {regions.map((region) => (
-                <RegionRow
-                  key={region.id}
-                  region={region}
-                  bgcId={bgcIds.get(region.id) ?? `R${region.id}`}
-                  evidenceLabel={t.evidence[evidenceKey(region)]}
-                  detailUrl={detailHref(region.id)}
-                  noHitLabel={t.explorer.noHit}
-                  unknownProduct={t.explorer.unknownProduct}
-                  locale={locale}
-                />
-              ))}
+              {genomeGroups.map(([genome, rows]) => {
+                const nSafe = rows.filter((r) => r.safe_pass).length;
+                return (
+                  <Fragment key={genome}>
+                    {multiGenome && (
+                      <tr className="border-y border-white/[0.06] bg-white/[0.03]">
+                        <td colSpan={8} className="px-4 py-2">
+                          <span className="text-xs font-medium text-fg">{genome}</span>
+                          <span className="ml-2 text-micro text-fg-subtle">
+                            {rows.length} {t.explorer.regionsUnit}
+                            {nSafe > 0 ? ` · ${nSafe} ${t.explorer.groupSafe}` : ""}
+                          </span>
+                        </td>
+                      </tr>
+                    )}
+                    {rows.map((region) => (
+                      <RegionRow
+                        key={region.id}
+                        region={region}
+                        bgcId={bgcIds.get(region.id) ?? `R${region.id}`}
+                        evidenceLabel={t.evidence[evidenceKey(region)]}
+                        detailUrl={detailHref(region.id)}
+                        noHitLabel={t.explorer.noHit}
+                        unknownProduct={t.explorer.unknownProduct}
+                        locale={locale}
+                      />
+                    ))}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         )}
