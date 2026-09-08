@@ -223,6 +223,7 @@ def parse_domtblout(tbl_path: Path) -> dict[str, list[dict]]:
                     "hmm_end":   int(cols[16]),
                     "env_start": int(cols[19]),
                     "env_end":   int(cols[20]),
+                    "description": cols[22] if len(cols) > 22 else "",
                 }
             except (ValueError, IndexError):
                 continue

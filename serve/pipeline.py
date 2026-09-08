@@ -441,6 +441,7 @@ def _annotate_and_classify(
     safe_tier_min: str,
     extend_flank_bp: int,
     core_pep_path: Path | None = None,
+    evidence_extend: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]], Path | None, Path | None]:
     gbk_path: Path | None = None
     mibig_hits: dict[str, list[dict[str, Any]]] = {}
@@ -568,6 +569,9 @@ def _annotate_and_classify(
             out_dir=results_dir / "extended",
             genome_name=str(raw_rows[0]["genome"]) if raw_rows else "genome",
             flank_bp=extend_flank_bp,
+            evidence_extend=evidence_extend,
+            pfam_db=settings.pfam_db_path,
+            hmmer_bin=settings.hmmer_bin,
         )
     else:
         write_extended_outputs(
@@ -577,6 +581,9 @@ def _annotate_and_classify(
             genome_name=str(raw_rows[0]["genome"]) if raw_rows else "genome",
             prodigal_bin=settings.prodigal_bin,
             flank_bp=extend_flank_bp,
+            evidence_extend=evidence_extend,
+            pfam_db=settings.pfam_db_path,
+            hmmer_bin=settings.hmmer_bin,
         )
     return out_rows, cds_by_region, mibig_hits, gbk_path, pfam_tbl
 

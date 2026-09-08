@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
-from .extended import read_fasta, wrap_fasta
+from .extended import apply_evidence_extension, read_fasta, wrap_fasta
 
 
 @dataclass(frozen=True)
@@ -508,6 +508,10 @@ def write_extended_outputs_from_gff3(
     flank_bp: int,
     core_pep_fasta: Path | None = None,
     translation_table: int = 1,
+    evidence_extend: bool = True,
+    pfam_db: Path | None = None,
+    hmmer_bin: Path | None = None,
+    hmmscan_threads: int = 8,
 ) -> dict[str, Path]:
     contigs = read_fasta(fasta_path)
     core_peptides = load_core_peptides(core_pep_fasta) if core_pep_fasta else {}
@@ -525,6 +529,30 @@ def write_extended_outputs_from_gff3(
         end = int(row["end"])
         row["ext_start"] = max(0, start - flank_bp)
         row["ext_end"] = min(contig_lens.get(contig, end + flank_bp), end + flank_bp)
+        row["ext_method"] = "fixed_flank"
+
+    if evidence_extend:
+        apply_evidence_extension(
+            rows=rows,
+            genes_by_contig={
+                contig: [
+                    {
+                        "locus_tag": cds.locus_tag,
+                        "start": cds.start,
+                        "end": cds.end,
+                        "sequence": cds.aa_sequence,
+                    }
+                    for cds in records
+                ]
+                for contig, records in by_contig.items()
+            },
+            contig_lens=contig_lens,
+            flank_bp=flank_bp,
+            work_dir=out_dir / "_evidence_hmmscan",
+            pfam_db=pfam_db,
+            hmmer_bin=hmmer_bin,
+            threads=hmmscan_threads,
+        )
 
     regions_fna = out_dir / "extended_regions.fna"
     cds_faa = out_dir / "extended_cds.faa"
