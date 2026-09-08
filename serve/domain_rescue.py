@@ -658,6 +658,15 @@ def merge_model_and_domain_rows(model_rows: list[dict[str, Any]], domain_rows: l
             continue
         row = out[hit_index]
         row["proposal_source"] = "model_domain_consensus"
+        # Guarantee the merged row still covers the rescue seed core: a model
+        # region may only graze the rescued proposal's flank (e.g. a terpene
+        # synthase seed sitting >10 kb outside the model bounds), which would
+        # otherwise leave the causal gene outside the reported region.
+        core_start = domain.get("seed_core_start")
+        core_end = domain.get("seed_core_end")
+        if core_start is not None and core_end is not None:
+            row["start"] = min(int(row["start"]), int(core_start))
+            row["end"] = max(int(row["end"]), int(core_end))
         row["domain_rescue"] = True
         row["seed_type"] = domain.get("seed_type") or row.get("seed_type") or ""
         row["seed_rule"] = domain.get("seed_rule") or row.get("seed_rule") or ""

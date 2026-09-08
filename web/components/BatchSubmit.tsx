@@ -407,6 +407,9 @@ export function BatchSubmit({ isLoggedIn, compact = false }: { isLoggedIn: boole
                 ))}
               </div>
               <p className="mt-2 text-micro text-fg-subtle">{t.submit.tierHelp}</p>
+              {safeTierMin === "Tier1" && (
+                <p className="mt-1.5 text-micro text-warning">{t.submit.tierStrictWarn}</p>
+              )}
             </div>
           </div>
         </div>

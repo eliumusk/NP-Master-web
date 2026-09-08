@@ -105,3 +105,38 @@ export function seedGeneOf(region: Region): { name: string; extra: number } | nu
   if (!name) return null;
   return { name, extra: Math.max(0, cores.length - 1) };
 }
+
+/** Region id of the nearest same-contig neighbour within maxGapBp, if any.
+ *  Used to flag likely split/hybrid clusters in the explorer table. */
+export function nearestNeighbour(
+  regions: Array<Pick<Region, "id" | "genome_name" | "contig" | "start_bp" | "end_bp">>,
+  maxGapBp = 5000,
+): Map<number, { id: number; gap: number }> {
+  const out = new Map<number, { id: number; gap: number }>();
+  const byContig = new Map<string, typeof regions>();
+  for (const r of regions) {
+    const key = `${r.genome_name}|${r.contig}`;
+    const arr = byContig.get(key);
+    if (arr) arr.push(r);
+    else byContig.set(key, [r]);
+  }
+  for (const arr of byContig.values()) {
+    const sorted = [...arr].sort((a, b) => a.start_bp - b.start_bp);
+    for (let i = 0; i < sorted.length; i++) {
+      const r = sorted[i];
+      const prev = sorted[i - 1];
+      const next = sorted[i + 1];
+      let best: { id: number; gap: number } | null = null;
+      if (prev) {
+        const gap = Math.max(0, r.start_bp - prev.end_bp);
+        if (gap <= maxGapBp) best = { id: prev.id, gap };
+      }
+      if (next) {
+        const gap = Math.max(0, next.start_bp - r.end_bp);
+        if (gap <= maxGapBp && (!best || gap < best.gap)) best = { id: next.id, gap };
+      }
+      if (best) out.set(r.id, best);
+    }
+  }
+  return out;
+}

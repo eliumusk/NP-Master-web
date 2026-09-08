@@ -27,7 +27,7 @@ export function JobOverview({
         <div className="flex flex-wrap items-stretch gap-4">
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-y-4 sm:grid-cols-4 sm:divide-x sm:divide-white/[0.06]">
             <Metric label={t.workspace.totalRegions} value={job.n_regions} />
-            <Metric label={t.workspace.highConf} value={job.n_safe} accent />
+            <Metric label={`${t.workspace.highConf} · ≤${job.safe_tier_min}`} value={job.n_safe} accent />
             <Metric label={t.workspace.typeCount} value={typeCount} />
             <Metric label={t.workspace.contigCount} value={contigCount} />
           </div>
