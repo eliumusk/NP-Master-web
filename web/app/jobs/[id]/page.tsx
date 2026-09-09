@@ -37,7 +37,7 @@ export default async function JobPage({
 
   const { data: regions } = await admin
     .from("regions")
-    .select("id,genome_name,contig,start_bp,end_bp,ext_start_bp,ext_end_bp,score,bgc_type,type_score,type_scores,safe_tier,safe_pass,safe_type_label,mibig_hits,cds_features")
+    .select("id,bgc_id,genome_name,contig,start_bp,end_bp,ext_start_bp,ext_end_bp,score,bgc_type,type_score,type_scores,safe_tier,safe_pass,safe_type_label,mibig_hits,cds_features")
     .eq("job_id", id)
     .order("score", { ascending: false })
     .limit(1000);

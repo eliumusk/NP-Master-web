@@ -40,7 +40,7 @@ export default async function RegionPage({
       .eq("job_id", id),
     admin
       .from("regions")
-      .select("id,genome_name,contig,start_bp,end_bp,ext_start_bp,ext_end_bp,score,bgc_type,type_score,type_scores,safe_tier,safe_pass,safe_type_label,mibig_hits,cds_features")
+      .select("id,bgc_id,genome_name,contig,start_bp,end_bp,ext_start_bp,ext_end_bp,score,bgc_type,type_score,type_scores,safe_tier,safe_pass,safe_type_label,mibig_hits,cds_features")
       .eq("id", regionIdNum)
       .eq("job_id", id)
       .maybeSingle(),

@@ -69,6 +69,8 @@ export type CdsFeature = {
 
 export type Region = {
   id: number;
+  /** Pipeline-side id from regions.csv (BGC_M#### / BGC_D####); null for rows predating migration 0007. */
+  bgc_id: string | null;
   genome_name: string;
   contig: string;
   start_bp: number;

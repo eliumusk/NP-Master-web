@@ -19,6 +19,7 @@ export function filterRegions(regions: Region[], filters: RegionFilters, bgcIds?
       .join(" ");
     return [
       bgcIds?.get(region.id),
+      region.bgc_id,
       region.genome_name,
       region.contig,
       region.bgc_type,

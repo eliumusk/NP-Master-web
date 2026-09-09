@@ -659,6 +659,7 @@ def _insert_regions_for_genome(
             "job_id": job_id,
             "genome_id": genome["id"],
             "genome_name": genome["genome_name"],
+            "bgc_id": bgc_id,
             "contig": row["contig"],
             "start_bp": int(row["start"]),
             "end_bp": int(row["end"]),
