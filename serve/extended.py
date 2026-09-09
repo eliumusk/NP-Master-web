@@ -124,7 +124,7 @@ def apply_evidence_extension(
     search_bp: int = 25_000,
     max_gap_bp: int = 3_000,
     max_non_biosynth_run: int = 2,
-) -> None:
+) -> dict[str, list[dict[str, Any]]]:
     """Extend ext_start/ext_end beyond the fixed flank using Pfam evidence.
 
     For each region side, walk outward gene by gene from the region boundary:
@@ -141,15 +141,19 @@ def apply_evidence_extension(
     genes_by_contig values are dicts with locus_tag/start/end/sequence keys
     (sequence = amino acids). Rows must already carry fixed-flank
     ext_start/ext_end and ext_method="fixed_flank".
+
+    Returns the parsed flank-hmmscan domtblout as {locus_tag: [domain_hit, ...]}
+    so callers can reuse the Pfam hits (e.g. for display flank CDS); {} when
+    no scan ran.
     """
     if not rows or not genes_by_contig:
-        return
+        return {}
     if hmmer_bin is None or not Path(hmmer_bin).exists():
         log.warning("evidence extension disabled: hmmscan not found at %s; keeping fixed flank", hmmer_bin)
-        return
+        return {}
     if pfam_db is None or not Path(pfam_db).exists():
         log.warning("evidence extension disabled: Pfam db not found at %s; keeping fixed flank", pfam_db)
-        return
+        return {}
 
     terms = _biosynth_terms()
 
@@ -169,6 +173,7 @@ def apply_evidence_extension(
                 candidates[str(gene["locus_tag"])] = gene
 
     biosynth_ids: set[str] = set()
+    domains_by_query: dict[str, list[dict[str, Any]]] = {}
     if candidates:
         work_dir.mkdir(parents=True, exist_ok=True)
         faa = work_dir / "flank_candidates.faa"
@@ -191,7 +196,7 @@ def apply_evidence_extension(
             domains_by_query = parse_domtblout(tbl)
         except Exception as exc:
             log.warning("evidence extension hmmscan failed (%s); keeping fixed flank", exc)
-            return
+            return {}
         from .safe import has_any
 
         for tag, hits in domains_by_query.items():
@@ -274,6 +279,30 @@ def apply_evidence_extension(
         row["ext_start"] = new_start
         row["ext_end"] = new_end
 
+    return domains_by_query
+
+
+def trim_flank_domains(
+    hits: list[dict[str, Any]],
+    max_domains: int = 6,
+) -> list[dict[str, Any]]:
+    """Trim raw parse_domtblout hits to the regions.cds_features pfam_domains shape.
+
+    Keeps the top hits by bitscore (display order N→C), mirroring
+    pfam.annotate_regions_gbk's per-CDS trim.
+    """
+    kept = sorted(hits, key=lambda d: -float(d.get("bitscore") or 0.0))[:max_domains]
+    kept.sort(key=lambda d: int(d.get("env_start") or 0))
+    return [{
+        "name": d.get("name") or "",
+        "accession": d.get("accession") or "",
+        "e_value": d.get("e_value"),
+        "bitscore": d.get("bitscore"),
+        "env_start": d.get("env_start"),
+        "env_end": d.get("env_end"),
+        "description": d.get("description") or "",
+    } for d in kept]
+
 
 def write_extended_outputs(
     *,
@@ -327,8 +356,9 @@ def write_extended_outputs(
         for gene_id, meta in aa.items():
             genes_by_contig.setdefault(str(meta["contig"]), []).append((gene_id, meta))
 
+    flank_domains: dict[str, list[dict[str, Any]]] = {}
     if evidence_extend and genes_by_contig:
-        apply_evidence_extension(
+        flank_domains = apply_evidence_extension(
             rows=rows,
             genes_by_contig={
                 contig: [
@@ -349,6 +379,45 @@ def write_extended_outputs(
             hmmer_bin=hmmer_bin,
             threads=hmmscan_threads,
         )
+
+    # Display-only flank CDS: prodigal genes inside the extended span but not
+    # overlapping the core region. Attached to the row (genomic coordinates);
+    # the pipeline merges them into regions.cds_features with in_core=False so
+    # the web detail page can draw the full extended locus. Pfam hits come from
+    # the evidence-extension hmmscan of boundary-neighbouring CDS.
+    from .pfam import classify_cds_by_domains
+
+    for row in rows:
+        contig = str(row["contig"])
+        start = int(row["start"])
+        end = int(row["end"])
+        ext_start = int(row["ext_start"])
+        ext_end = int(row["ext_end"])
+        flank_cds: list[dict[str, Any]] = []
+        for gene_id, meta in genes_by_contig.get(contig, []):
+            gene_start = int(meta["start"])
+            gene_end = int(meta["end"])
+            if gene_start >= ext_end or gene_end <= ext_start:
+                continue
+            if gene_start < end and gene_end > start:
+                continue  # overlaps the core region -> already in cds_features
+            aa_seq = str(meta.get("sequence") or "")
+            raw_hits = flank_domains.get(gene_id, [])
+            domains = trim_flank_domains(raw_hits)
+            flank_cds.append({
+                "locus_tag": gene_id,
+                "start": gene_start,
+                "end": gene_end,
+                "strand": 1 if int(meta["strand"]) == 1 else -1,
+                "length_aa": len(aa_seq),
+                "product": "hypothetical protein",
+                "function_class": classify_cds_by_domains(raw_hits),
+                "aa_sequence": aa_seq,
+                "nt_sequence": str((nt.get(gene_id) or {}).get("sequence") or ""),
+                "pfam_domains": domains,
+            })
+        flank_cds.sort(key=lambda cds: cds["start"])
+        row["flank_cds"] = flank_cds
 
     with open(regions_fna, "w") as handle:
         for row in safe_rows:

@@ -415,13 +415,18 @@ def _decode_to_csv(
 
 def _write_csv(path: Path, rows: list[dict[str, Any]], preferred: list[str] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Display-only payloads that live on the row for the DB insert but must not
+    # leak into the CSV artifacts (they carry full sequences and would bloat it).
+    skip = {"flank_cds"}
     fieldnames = list(preferred or [])
     for row in rows:
         for key in row:
+            if key in skip:
+                continue
             if key not in fieldnames:
                 fieldnames.append(key)
     with open(path, "w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -612,6 +617,32 @@ def _upload_artifact(
     return key
 
 
+def _display_cds_features(
+    row: dict[str, Any],
+    core_cds: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge core and flank CDS into the display list stored in regions.cds_features.
+
+    Core CDS come from pfam.annotate_regions_gbk with coordinates relative to
+    the region start; flank CDS (row["flank_cds"], set by the extended-output
+    writers) carry genomic coordinates and are shifted into the same
+    region-relative frame, so flank entries may have negative start values.
+    Core entries are flagged in_core=True, flank entries in_core=False; the
+    merged list is sorted by start. Type classification and safe grading keep
+    using the core-only cds_by_region — this merge is display-only.
+    """
+    region_start = int(row["start"])
+    display: list[dict[str, Any]] = [dict(cds, in_core=True) for cds in core_cds]
+    for cds in row.get("flank_cds") or []:
+        item = dict(cds)
+        item["start"] = int(cds.get("start") or 0) - region_start
+        item["end"] = int(cds.get("end") or 0) - region_start
+        item["in_core"] = False
+        display.append(item)
+    display.sort(key=lambda cds: int(cds.get("start") or 0))
+    return display
+
+
 def _insert_regions_for_genome(
     supa: Any,
     *,
@@ -641,7 +672,7 @@ def _insert_regions_for_genome(
             "safe_pass": bool(row.get("safe_pass")),
             "safe_type_label": row.get("safe_type_label"),
             "mibig_hits": mibig_hits.get(bgc_id, []),
-            "cds_features": cds_by_region.get(bgc_id, []),
+            "cds_features": _display_cds_features(row, cds_by_region.get(bgc_id, [])),
         })
 
     inserted = insert_region_rows(supa, payload)

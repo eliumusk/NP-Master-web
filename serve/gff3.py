@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
-from .extended import apply_evidence_extension, read_fasta, wrap_fasta
+from .extended import apply_evidence_extension, read_fasta, trim_flank_domains, wrap_fasta
 
 
 @dataclass(frozen=True)
@@ -531,8 +531,9 @@ def write_extended_outputs_from_gff3(
         row["ext_end"] = min(contig_lens.get(contig, end + flank_bp), end + flank_bp)
         row["ext_method"] = "fixed_flank"
 
+    flank_domains: dict[str, list[dict[str, Any]]] = {}
     if evidence_extend:
-        apply_evidence_extension(
+        flank_domains = apply_evidence_extension(
             rows=rows,
             genes_by_contig={
                 contig: [
@@ -553,6 +554,42 @@ def write_extended_outputs_from_gff3(
             hmmer_bin=hmmer_bin,
             threads=hmmscan_threads,
         )
+
+    # Display-only flank CDS: GFF3 genes inside the extended span but not
+    # overlapping the core region. Attached to the row (genomic coordinates);
+    # the pipeline merges them into regions.cds_features with in_core=False so
+    # the web detail page can draw the full extended locus. Pfam hits come from
+    # the evidence-extension hmmscan of boundary-neighbouring CDS.
+    from .pfam import classify_cds_by_domains
+
+    for row in rows:
+        contig = str(row["contig"])
+        start = int(row["start"])
+        end = int(row["end"])
+        ext_start = int(row["ext_start"])
+        ext_end = int(row["ext_end"])
+        flank_cds: list[dict[str, Any]] = []
+        for cds in by_contig.get(contig, []):
+            if cds.start >= ext_end or cds.end <= ext_start:
+                continue
+            if cds.start < end and cds.end > start:
+                continue  # overlaps the core region -> already in cds_features
+            raw_hits = flank_domains.get(cds.locus_tag, [])
+            domains = trim_flank_domains(raw_hits)
+            flank_cds.append({
+                "locus_tag": cds.locus_tag,
+                "start": cds.start,
+                "end": cds.end,
+                "strand": cds.strand,
+                "length_aa": cds.length_aa,
+                "product": cds.product,
+                "function_class": classify_cds_by_domains(raw_hits),
+                "aa_sequence": cds.aa_sequence,
+                "nt_sequence": cds.nt_sequence,
+                "pfam_domains": domains,
+            })
+        flank_cds.sort(key=lambda cds: cds["start"])
+        row["flank_cds"] = flank_cds
 
     regions_fna = out_dir / "extended_regions.fna"
     cds_faa = out_dir / "extended_cds.faa"
