@@ -132,7 +132,16 @@ export function RegionDetailView({
                       onClick={() => setSelectedCds(selectedCds === i ? null : i)}
                       className={`cursor-pointer border-b border-white/[0.06] transition-colors last:border-0 hover:bg-white/[0.03] ${selectedCds === i ? "bg-brand/[0.08]" : ""}`}
                     >
-                      <td className="px-3 py-2 font-mono text-fg">{cds.locus_tag || `cds_${i + 1}`}</td>
+                      <td className="px-3 py-2 font-mono text-fg">
+                        <span className="flex items-center gap-1.5">
+                          {cds.locus_tag || `cds_${i + 1}`}
+                          {cds.in_core === false && (
+                            <span className="inline-flex items-center rounded-pill border border-white/[0.12] px-1.5 py-px font-sans text-micro text-fg-subtle">
+                              {t.region.flankCds}
+                            </span>
+                          )}
+                        </span>
+                      </td>
                       <td className="max-w-[18rem] px-3 py-2">
                         <span className="block truncate text-fg-muted" title={fn ? fn.text : ""}>{fnText}</span>
                       </td>
@@ -402,10 +411,15 @@ function CdsDetailCard({ cds, index, onClose }: { cds: CdsFeature; index: number
           ×
         </button>
       </div>
-      <div className="mt-1.5">
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
         <span className={`inline-flex rounded-pill px-2 py-0.5 text-micro font-medium ${classMeta.className}`}>
           {classMeta.label}
         </span>
+        {cds.in_core === false && (
+          <span className="inline-flex rounded-pill border border-white/[0.12] px-2 py-0.5 text-micro text-fg-subtle">
+            {t.region.flankCds}
+          </span>
+        )}
       </div>
 
       <dl className="mt-3 space-y-2 text-xs">

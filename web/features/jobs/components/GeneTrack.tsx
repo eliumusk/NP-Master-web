@@ -117,6 +117,7 @@ export function GeneTrack({
                 locale={locale}
                 hypothetical={t.detail.hypothetical}
                 pfamNote={t.region.pfamPredicted}
+                flankNote={t.region.flankCds}
                 selected={selectedIndex === i}
                 onSelect={() => onSelect(selectedIndex === i ? null : i)}
               />
@@ -160,6 +161,12 @@ export function GeneTrack({
           <span className="inline-block h-2.5 w-2.5 rounded-[2px] border border-white/40 bg-white/35" />
           {t.detail.pfamDomain}
         </span>
+        {cdsList.some((c) => c.in_core === false) && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-[2px] border border-dashed border-white/50 bg-white/10" />
+            {t.region.flankCds}
+          </span>
+        )}
         <span className="ml-auto font-mono text-fg-subtle">
           {t.detail.corePrefix} 0–{formatBp(coreLen)}{extStart != null && extStart < 0 ? ` · ${t.detail.metaExt} ${formatBp(-extStart)}` : ""}
         </span>
@@ -174,6 +181,7 @@ function GeneArrow({
   locale,
   hypothetical,
   pfamNote,
+  flankNote,
   selected,
   onSelect,
 }: {
@@ -182,6 +190,7 @@ function GeneArrow({
   locale: "zh" | "en";
   hypothetical: string;
   pfamNote: string;
+  flankNote: string;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -219,8 +228,16 @@ function GeneArrow({
 
   return (
     <g className="cursor-pointer transition-opacity hover:opacity-85" onClick={onSelect}>
-      <polygon points={pts} fill={color} fillOpacity={selected ? 0.7 : 0.35} stroke={color} strokeOpacity={selected ? 1 : 0.7} strokeWidth={selected ? 1.5 : 1}>
-        <title>{`${label || "CDS"} · ${fnLabel}\n${start}–${end} bp (${strand < 0 ? "−" : "+"}) · ${functionClassMeta(fc, locale).label}`}</title>
+      <polygon
+        points={pts}
+        fill={color}
+        fillOpacity={selected ? 0.7 : cds.in_core === false ? 0.15 : 0.35}
+        stroke={color}
+        strokeOpacity={selected ? 1 : cds.in_core === false ? 0.45 : 0.7}
+        strokeWidth={selected ? 1.5 : 1}
+        strokeDasharray={cds.in_core === false ? "4 2" : undefined}
+      >
+        <title>{`${label || "CDS"} · ${fnLabel}\n${start}–${end} bp (${strand < 0 ? "−" : "+"}) · ${functionClassMeta(fc, locale).label}${cds.in_core === false ? ` · ${flankNote}` : ""}`}</title>
       </polygon>
       {/* pfam domains: subtle light insets centred on the arrow body */}
       {domains.map((d, j) => {

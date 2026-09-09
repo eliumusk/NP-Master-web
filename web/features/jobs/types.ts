@@ -63,6 +63,8 @@ export type CdsFeature = {
   aa_sequence?: string;
   nt_sequence?: string;
   pfam_domains?: PfamDomain[];
+  /** false when the CDS lies in the extended flank rather than the core region. */
+  in_core?: boolean;
 };
 
 export type Region = {

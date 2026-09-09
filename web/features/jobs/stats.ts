@@ -140,3 +140,42 @@ export function nearestNeighbour(
   }
   return out;
 }
+
+/** Chain-merge regions on the same contig whose gaps are <= maxGapBp.
+ *  Returns regionId -> { group, size, members } for groups with >= 2 regions;
+ *  group numbers are assigned in genomic order (1-based). */
+export function clusterGroups(
+  regions: Array<Pick<Region, "id" | "genome_name" | "contig" | "start_bp" | "end_bp">>,
+  maxGapBp = 10_000,
+): Map<number, { group: number; size: number; members: number[] }> {
+  const byContig = new Map<string, typeof regions>();
+  for (const r of regions) {
+    const key = `${r.genome_name}|${r.contig}`;
+    const arr = byContig.get(key);
+    if (arr) arr.push(r);
+    else byContig.set(key, [r]);
+  }
+  const chains: number[][] = [];
+  for (const arr of byContig.values()) {
+    const sorted = [...arr].sort((a, b) => a.start_bp - b.start_bp);
+    let chain: number[] = [];
+    let chainEnd = -Infinity;
+    for (const r of sorted) {
+      if (chain.length > 0 && r.start_bp - chainEnd > maxGapBp) {
+        chains.push(chain);
+        chain = [];
+      }
+      chain.push(r.id);
+      chainEnd = Math.max(chainEnd, r.end_bp);
+    }
+    if (chain.length) chains.push(chain);
+  }
+  const out = new Map<number, { group: number; size: number; members: number[] }>();
+  let n = 0;
+  for (const chain of chains) {
+    if (chain.length < 2) continue;
+    n += 1;
+    for (const id of chain) out.set(id, { group: n, size: chain.length, members: chain });
+  }
+  return out;
+}

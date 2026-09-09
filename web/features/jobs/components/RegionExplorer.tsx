@@ -5,7 +5,7 @@ import { Fragment } from "react";
 import { useI18n } from "@/lib/i18n/client";
 import { ALL_FILTER, EVIDENCE_CHIP, bgcTypeMeta } from "../constants";
 import { formatRange } from "../format";
-import { evidenceKey, extendedLength, nearestNeighbour, seedGeneOf } from "../stats";
+import { evidenceKey, extendedLength, clusterGroups, seedGeneOf } from "../stats";
 import type { Region, RegionFilters } from "../types";
 
 export function RegionExplorer({
@@ -37,7 +37,7 @@ export function RegionExplorer({
     else groupMap.set(region.genome_name, [region]);
   }
   const genomeGroups = [...groupMap.entries()];
-  const neighbours = nearestNeighbour(allRegions);
+  const clusters = clusterGroups(allRegions);
 
   return (
     <section className="panel min-w-0 overflow-hidden">
@@ -147,7 +147,7 @@ export function RegionExplorer({
                         key={region.id}
                         region={region}
                         bgcId={bgcIds.get(region.id) ?? `R${region.id}`}
-                        nearTip={formatNearTip(neighbours.get(region.id), bgcIds, t.explorer.nearClusterTip)}
+                        cluster={formatCluster(clusters.get(region.id), bgcIds, t.explorer.clusterGroupTip)}
                         evidenceLabel={t.evidence[evidenceKey(region)]}
                         detailUrl={detailHref(region.id)}
                         noHitLabel={t.explorer.noHit}
@@ -169,7 +169,7 @@ export function RegionExplorer({
 function RegionRow({
   region,
   bgcId,
-  nearTip,
+  cluster,
   evidenceLabel,
   detailUrl,
   noHitLabel,
@@ -177,7 +177,7 @@ function RegionRow({
 }: {
   region: Region;
   bgcId: string;
-  nearTip?: string | null;
+  cluster?: { label: string; tip: string } | null;
   evidenceLabel: string;
   detailUrl: string;
   noHitLabel: string;
@@ -201,12 +201,12 @@ function RegionRow({
           >
             {bgcId}
           </Link>
-          {nearTip && (
-            <span title={nearTip} className="relative z-10 text-fg-subtle">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
-                <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
-                <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
-              </svg>
+          {cluster && (
+            <span
+              title={cluster.tip}
+              className="relative z-10 inline-flex items-center rounded-pill border border-brand/30 bg-brand/10 px-1.5 py-px text-micro font-medium text-brand"
+            >
+              {cluster.label}
             </span>
           )}
         </span>
@@ -295,12 +295,12 @@ function uniqueSortedKeys(regions: Region[]) {
   return order.filter((key) => present.has(key as never));
 }
 
-function formatNearTip(
-  near: { id: number; gap: number } | undefined,
+function formatCluster(
+  info: { group: number; size: number; members: number[] } | undefined,
   bgcIds: Map<number, string>,
   template: string,
-): string | null {
-  if (!near) return null;
-  const id = bgcIds.get(near.id) ?? `R${near.id}`;
-  return template.replace("{id}", id).replace("{gap}", (near.gap / 1000).toFixed(1));
+): { label: string; tip: string } | null {
+  if (!info) return null;
+  const ids = info.members.map((id) => bgcIds.get(id) ?? `R${id}`).join(", ");
+  return { label: `G${info.group}·${info.size}`, tip: template.replace("{ids}", ids) };
 }
