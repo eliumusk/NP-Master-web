@@ -210,9 +210,6 @@ function RegionRow({
             </span>
           )}
         </span>
-        {region.bgc_id && (
-          <span className="mt-0.5 block font-mono text-micro text-fg-subtle">{region.bgc_id}</span>
-        )}
       </td>
       <td className="max-w-[10rem] px-3 py-3">
         <div className="truncate font-mono text-xs text-fg" title={region.contig}>{region.contig}</div>

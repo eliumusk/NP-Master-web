@@ -36,7 +36,7 @@ export default async function RegionPage({
   const [regionsRes, regionRes] = await Promise.all([
     admin
       .from("regions")
-      .select("id,genome_name,contig,start_bp")
+      .select("id,bgc_id,genome_name,contig,start_bp")
       .eq("job_id", id),
     admin
       .from("regions")

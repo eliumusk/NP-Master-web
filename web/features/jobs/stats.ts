@@ -33,9 +33,11 @@ export function filterRegions(regions: Region[], filters: RegionFilters, bgcIds?
 
 // ── Display helpers for the candidate-centric results view ─────────────
 
-/** Stable display ids (BGC_0001…) in biological order: genome, contig, start. */
+/** Stable display ids. Prefers the pipeline-side bgc_id (matches downloaded
+ * CSV/zip artifacts); rows predating migration 0007 fall back to positional
+ * ids (BGC_0001…) in biological order: genome, contig, start. */
 export function assignBgcIds(
-  regions: Array<Pick<Region, "id" | "genome_name" | "contig" | "start_bp">>,
+  regions: Array<Pick<Region, "id" | "genome_name" | "contig" | "start_bp" | "bgc_id">>,
 ): Map<number, string> {
   const sorted = [...regions].sort((a, b) =>
     a.genome_name.localeCompare(b.genome_name)
@@ -43,7 +45,15 @@ export function assignBgcIds(
     || a.start_bp - b.start_bp,
   );
   const map = new Map<number, string>();
-  sorted.forEach((region, i) => map.set(region.id, `BGC_${String(i + 1).padStart(4, "0")}`));
+  let fallback = 0;
+  for (const region of sorted) {
+    if (region.bgc_id) {
+      map.set(region.id, region.bgc_id);
+    } else {
+      fallback += 1;
+      map.set(region.id, `BGC_${String(fallback).padStart(4, "0")}`);
+    }
+  }
   return map;
 }
 

@@ -70,9 +70,6 @@ export function RegionDetailView({
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="font-mono text-2xl font-semibold tracking-tight">{bgcId}</h1>
-          {region.bgc_id && (
-            <span className="font-mono text-sm text-fg-subtle" title="Pipeline ID">({region.bgc_id})</span>
-          )}
           <span className={`inline-flex rounded-pill px-2.5 py-0.5 text-xs font-medium ${typeMeta.className}`}>
             {typeMeta.label}
           </span>
