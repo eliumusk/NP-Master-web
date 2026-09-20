@@ -100,8 +100,8 @@ class Settings(BaseSettings):
     results_bucket: str = Field(default="results", alias="RESULTS_BUCKET")
 
     resend_api_key: str = Field(default="", alias="RESEND_API_KEY")
-    email_from: str = Field(default="Genomine <noreply@bgcmaster.bio>", alias="EMAIL_FROM")
-    site_base_url: str = Field(default="https://www.bgcmaster.bio", alias="SITE_BASE_URL")
+    email_from: str = Field(default="Genomine <noreply@genomine.bio>", alias="EMAIL_FROM")
+    site_base_url: str = Field(default="https://www.genomine.bio", alias="SITE_BASE_URL")
 
 
 _cached: Settings | None = None

@@ -8,8 +8,8 @@ import type { Dictionary } from "./zh";
 type I18nValue = { locale: Locale; t: Dictionary; setLocale: (l: Locale) => void };
 
 const I18nContext = createContext<I18nValue>({
-  locale: "zh",
-  t: getDictionary("zh"),
+  locale: "en",
+  t: getDictionary("en"),
   setLocale: () => {},
 });
 

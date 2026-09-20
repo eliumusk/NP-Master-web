@@ -6,7 +6,7 @@ export type { Dictionary };
 export const LOCALE_COOKIE = "bgc_locale";
 
 export function resolveLocale(value: string | null | undefined): Locale {
-  return value === "en" ? "en" : "zh";
+  return value === "zh" ? "zh" : "en";
 }
 
 export function getDictionary(locale: Locale): Dictionary {
