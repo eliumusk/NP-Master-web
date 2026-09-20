@@ -1,4 +1,4 @@
-# BGCMaster Web — 技术与需求文档
+# Genomine Web — 技术与需求文档
 
 > 基于 NP-Master-web 架构扩展，覆盖完整批量分析流程
 
