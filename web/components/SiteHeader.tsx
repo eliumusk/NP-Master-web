@@ -23,7 +23,7 @@ export function SiteHeader({ email }: { email: string | null }) {
       <div className={`mx-auto flex h-16 w-full ${wide ? "max-w-7xl" : "max-w-6xl"} items-center justify-between px-5 sm:px-6`}>
         <Link href="/" className="group flex items-center gap-2.5">
           <Logo className="h-8 w-8 transition-opacity group-hover:opacity-80" />
-          <span className="text-lead font-semibold tracking-tight text-fg">BGCMaster</span>
+          <span className="text-lead font-semibold tracking-tight text-fg">Genomine</span>
         </Link>
 
         <nav className="flex items-center gap-1 text-sm">

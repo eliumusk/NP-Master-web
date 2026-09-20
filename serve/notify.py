@@ -50,13 +50,13 @@ def _notify(supa: Any, settings: Settings, job: dict[str, Any], *, ok: bool, det
     title = job.get("title") or job_id
     url = f"{settings.site_base_url}/jobs/{job_id}"
     if ok:
-        subject = f"[BGCMaster] 任务完成 / Job finished: {title}"
+        subject = f"[Genomine] 任务完成 / Job finished: {title}"
         text = (
             f"你的任务「{title}」已完成。\n{detail}\n查看结果：{url}\n\n"
             f"Your job \"{title}\" has finished.\n{detail}\nResults: {url}\n"
         )
     else:
-        subject = f"[BGCMaster] 任务失败 / Job failed: {title}"
+        subject = f"[Genomine] 任务失败 / Job failed: {title}"
         text = (
             f"你的任务「{title}」未能完成。\n原因：{detail[:500]}\n任务页：{url}\n\n"
             f"Your job \"{title}\" failed.\nReason: {detail[:500]}\nJob: {url}\n"

@@ -8,7 +8,7 @@ export const en: Dictionary = {
     logout: "Log out",
   },
   footer: {
-    methods: "© 2026 BGCMaster",
+    methods: "© 2026 Genomine",
   },
   home: {
     titleA: "Bacterial genome BGC",
@@ -100,7 +100,7 @@ export const en: Dictionary = {
     errUpload: (code: number) => `Upload failed (${code})`,
     errNetwork: "Network error during upload",
     waitingCheck: "Pending check",
-    defaultTitle: "BGCMaster batch analysis",
+    defaultTitle: "Genomine batch analysis",
   },
   jobs: {
     title: "Jobs",

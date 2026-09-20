@@ -6,7 +6,7 @@ export const zh = {
     logout: "退出登录",
   },
   footer: {
-    methods: "© 2026 BGCMaster",
+    methods: "© 2026 Genomine",
   },
   home: {
     titleA: "细菌基因组的 BGC",
@@ -98,7 +98,7 @@ export const zh = {
     errUpload: (code: number) => `上传失败 (${code})`,
     errNetwork: "上传过程中网络异常",
     waitingCheck: "等待检查",
-    defaultTitle: "BGCMaster 批量分析",
+    defaultTitle: "Genomine 批量分析",
   },
   jobs: {
     title: "任务记录",

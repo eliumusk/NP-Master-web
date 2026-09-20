@@ -1,6 +1,6 @@
 import type { Config } from "tailwindcss";
 
-// BGCMaster dark "instrument" theme. Semantic tokens map to CSS variables
+// Genomine dark "instrument" theme. Semantic tokens map to CSS variables
 // in app/globals.css — use `text-fg`, `bg-surface`, etc., not raw palette
 // classes, in components. Status colours (success/warning/danger) are for
 // state indication only; `bgc-*` hues are reserved for BGC product types.

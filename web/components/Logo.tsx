@@ -1,4 +1,4 @@
-// BGCMaster mark — a genome ring with a highlighted BGC region segment.
+// Genomine mark — a genome ring with a highlighted BGC region segment.
 // Static asset (brand teal on transparent) generated from the source logo.
 export function Logo({ className }: { className?: string }) {
   return (

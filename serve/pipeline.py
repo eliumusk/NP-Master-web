@@ -1019,7 +1019,7 @@ def _aggregate_results(supa: Any, settings: Settings, job_id: str, results: list
     if not wrote_header:
         _write_csv(all_regions_csv, [], ["genome", "contig", "start", "end", "score"])
 
-    zip_path = job_dir / "bgcmaster_results.zip"
+    zip_path = job_dir / "genomine_results.zip"
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.write(all_regions_csv, "regions.csv")
         for result in results:
@@ -1046,7 +1046,7 @@ def _aggregate_results(supa: Any, settings: Settings, job_id: str, results: list
         job_id=job_id,
         genome_id=None,
         kind="results_zip",
-        key=f"{job_id}/bgcmaster_results.zip",
+        key=f"{job_id}/genomine_results.zip",
         path=zip_path,
         content_type="application/zip",
     )

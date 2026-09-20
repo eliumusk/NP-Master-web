@@ -320,7 +320,7 @@ def write_extended_outputs(
     """Write extended safe-pass region DNA and CDS outputs.
 
     All rows receive ext_start/ext_end fields. CDS outputs are restricted to
-    rows whose safe_pass is true, matching the BGCMaster export contract.
+    rows whose safe_pass is true, matching the Genomine export contract.
     With evidence_extend=True (default), the fixed flank is widened where
     boundary-adjacent CDS carry biosynthesis-related Pfam domains; set it to
     False to restore the plain fixed-flank behaviour.

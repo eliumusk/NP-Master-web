@@ -16,7 +16,7 @@ export const GenomeUpload = z.object({
 });
 
 export const JobCreate = z.object({
-  title: z.string().min(1).max(160).default("BGCMaster batch"),
+  title: z.string().min(1).max(160).default("Genomine batch"),
   genomes: z.array(GenomeUpload).min(1).max(64),
   threshold: z.number().gt(0).lt(1).default(0.95),
   extendThreshold: z.number().gt(0).lt(1).default(0.8),

@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* ─── Design tokens ────────────────────────────────────────────────
-   BGCMaster "dark instrument" theme. Single theme, near-black blue
+   Genomine "dark instrument" theme. Single theme, near-black blue
    surfaces, signal-teal accent. Status colours are semantic-only. */
 :root {
   color-scheme: dark;
