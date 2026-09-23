@@ -35,7 +35,12 @@ export type GenomeSummary = {
 
 export type MibigHit = {
   bgc_id?: string;
+  /** Cluster-level gene-content similarity: Σ best identity per matched query CDS / region CDS count. */
+  similarity?: number;
+  /** Best single-protein identity against this BGC — NOT cluster similarity; do not display as such. */
   identity?: number;
+  genes_matched?: number;
+  genes_total?: number;
   product?: string;
   /** Cluster-level compound name from mibig_clusters.json (e.g. "actinorhodin"). */
   cluster_product?: string;

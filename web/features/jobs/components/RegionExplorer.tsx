@@ -247,7 +247,7 @@ function RegionRow({
             <span className="block truncate text-fg">{topHit.cluster_product || topHit.product || unknownProduct}</span>
             <span className="block truncate font-mono text-micro text-fg-subtle">
               {topHit.bgc_id}
-              {topHit.identity != null && ` · ${Math.round(topHit.identity * 100)}%`}
+              {topHit.similarity != null && ` · ${Math.round(topHit.similarity * 100)}%`}
             </span>
           </span>
         ) : (

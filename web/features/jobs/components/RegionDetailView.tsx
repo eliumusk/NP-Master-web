@@ -313,14 +313,18 @@ function MibigPanel({ region }: { region: Region }) {
   const bestCluster = best.cluster_product || best.product || t.explorer.unknownProduct;
   return (
     <div className="mt-3 space-y-2">
-      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-btn border border-white/[0.06] bg-white/[0.06] sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-btn border border-white/[0.06] bg-white/[0.06] sm:grid-cols-4">
         <EvidenceMeta label={t.region.mibigBest} value={best.bgc_id || "-"} mono />
         <EvidenceMeta
           label={t.region.mibigProduct}
           value={bestCluster}
           title={best.cluster_product && best.product ? best.product : undefined}
         />
-        <EvidenceMeta label={t.region.mibigIdentity} value={best.identity == null ? "-" : formatPercent(best.identity)} />
+        <EvidenceMeta label={t.region.mibigIdentity} value={best.similarity == null ? "-" : formatPercent(best.similarity)} />
+        <EvidenceMeta
+          label={t.region.mibigGenes}
+          value={best.genes_matched != null && best.genes_total != null ? `${best.genes_matched}/${best.genes_total}` : "-"}
+        />
       </div>
       {hits.length > 1 && (
         <div className="space-y-1.5">
@@ -330,7 +334,7 @@ function MibigPanel({ region }: { region: Region }) {
               <span className="truncate text-fg-subtle" title={hit.cluster_product && hit.product ? hit.product : undefined}>
                 {hit.cluster_product || hit.product || t.explorer.unknownProduct}
               </span>
-              <span className="numeric-display shrink-0 text-brand">{hit.identity == null ? "-" : formatPercent(hit.identity)}</span>
+              <span className="numeric-display shrink-0 text-brand">{hit.similarity == null ? "-" : formatPercent(hit.similarity)}</span>
             </div>
           ))}
         </div>

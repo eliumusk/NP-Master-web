@@ -255,6 +255,7 @@ export const zh = {
     mibigBest: "最相似已知 BGC",
     mibigProduct: "产物",
     mibigIdentity: "相似度",
+    mibigGenes: "命中基因",
     noMibig: "无 MIBiG 近邻",
     seqProtein: "CDS 蛋白序列（FAA）",
     seqNt: "CDS 核酸序列（FNA）",

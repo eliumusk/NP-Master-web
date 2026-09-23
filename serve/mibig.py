@@ -15,8 +15,13 @@ At job time:
     from serve.mibig import search_regions_against_mibig
     hits_by_region = search_regions_against_mibig(regions_gbk, dmnd_db, top_k=3)
 
-Output is a list per region of dicts: {bgc_id, identity, evalue, product,
-cluster_product, query_cds}.
+Output is a list per region of dicts: {bgc_id, similarity, identity,
+genes_matched, genes_total, evalue, product, cluster_product, query_cds}.
+
+`similarity` is cluster-level: Σ(best protein identity per matched query CDS)
+divided by the region's CDS count. `identity` is only the best single-protein
+identity and must NOT be shown as cluster similarity — homologous enzymes
+routinely reach 50-80% pairwise identity between unrelated clusters.
 """
 from __future__ import annotations
 
@@ -210,11 +215,12 @@ def search_regions_against_mibig(*, regions_gbk: Path, dmnd_db: Path,
                                   diamond_bin: Path, top_k: int = 3,
                                   threads: int = 8,
                                   cluster_meta_json: Path | None = None) -> dict[str, list[dict]]:
-    """Run blastp, return {region_name: [hit_dict, ...]} (best-per-region; up to top_k).
+    """Run blastp, return {region_name: [hit_dict, ...]} (up to top_k per region).
 
-    Strategy: extract all region CDS as queries, blastp against MIBiG db with
-    `-k <large>`, then for each region take the top_k hits across all its CDSs
-    (deduplicated by MIBiG bgc_id, ordered by best identity).
+    Strategy: extract all region CDS as queries, blastp against the MIBiG db,
+    then aggregate per (region, MIBiG bgc_id) into a cluster-level
+    gene-content similarity and take the top_k bgc_ids per region (see
+    `_aggregate_blast_hits`).
 
     Each hit carries `product` (protein-level annotation of the single best
     matching MIBiG CDS) and, when the cluster-meta sidecar exists,
@@ -234,7 +240,8 @@ def search_regions_against_mibig(*, regions_gbk: Path, dmnd_db: Path,
            "-o", str(blast_out),
            "--outfmt", "6", "qseqid", "sseqid", "pident", "evalue",
            "length", "qlen", "slen", "bitscore",
-           "-k", str(top_k * 4),         # extra slack for cross-CDS dedup
+           "-k", str(max(top_k * 4, 50)),  # wide net: gene-content scoring needs hits across bgcs
+           "--evalue", "1e-5",             # significant hits only
            "--more-sensitive",
            "-p", str(threads),
            "--quiet"]
@@ -253,43 +260,86 @@ def search_regions_against_mibig(*, regions_gbk: Path, dmnd_db: Path,
         except Exception as e:
             log.warning("mibig: cluster meta unreadable (%s); continuing without", e)
 
-    # Aggregate: for each region, dedupe hits by bgc_id, keep best identity, take top_k.
-    by_region: dict[str, dict[str, dict]] = defaultdict(dict)
     with open(blast_out) as fh:
+        return _aggregate_blast_hits(fh, meta, cluster_meta,
+                                     _count_query_cds_by_region(query_faa), top_k)
+
+
+def _count_query_cds_by_region(query_faa: Path) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    with open(query_faa) as fh:
         for line in fh:
-            cols = line.rstrip("\n").split("\t")
-            if len(cols) < 8:
-                continue
-            qseq, sseq, pident, evalue, length, qlen, slen, bitscore = cols[:8]
-            try:
-                region = qseq.split("|")[0]
-            except Exception:
-                continue
-            sub = meta.get(sseq, {})
-            bgc_id = sub.get("bgc_id") or sseq.split("|")[0]
-            try:
-                identity = float(pident) / 100.0
-                evalue_f = float(evalue)
-                length_i = int(length)
-            except ValueError:
-                continue
-            existing = by_region[region].get(bgc_id)
-            if existing and existing["identity"] >= identity:
-                continue
-            by_region[region][bgc_id] = {
-                "bgc_id": bgc_id,
-                "identity": round(identity, 4),
-                "evalue": evalue_f,
-                "alignment_length": length_i,
+            if line.startswith(">"):
+                counts[line[1:].split("|")[0].strip()] += 1
+    return counts
+
+
+def _aggregate_blast_hits(hit_lines, meta: dict[str, dict],
+                          cluster_meta: dict[str, dict],
+                          region_cds_counts: dict[str, int],
+                          top_k: int) -> dict[str, list[dict]]:
+    """Cluster-level aggregation of DIAMOND tabular hits.
+
+    Per (region, MIBiG bgc_id) keep the best hit per query CDS, then score the
+    pair by gene content:
+
+        similarity = Σ(best identity per matched query CDS) / n_region_CDS
+
+    This is intentionally not the max single-protein identity (that number is
+    kept in `identity` for reference): a cluster that only shares one
+    homologous enzyme must score low even if that enzyme is highly conserved.
+    """
+    # per[region][bgc_id][query_cds] = (identity, evalue, alignment_length)
+    per: dict[str, dict[str, dict[str, tuple[float, float, int]]]] = defaultdict(lambda: defaultdict(dict))
+    bgc_info: dict[str, dict] = {}
+    for line in hit_lines:
+        cols = line.rstrip("\n").split("\t")
+        if len(cols) < 8:
+            continue
+        qseq, sseq, pident, evalue, length = cols[:5]
+        region = qseq.split("|")[0]
+        sub = meta.get(sseq, {})
+        bgc_id = sub.get("bgc_id") or sseq.split("|")[0]
+        try:
+            identity = float(pident) / 100.0
+            evalue_f = float(evalue)
+            length_i = int(length)
+        except ValueError:
+            continue
+        prev = per[region][bgc_id].get(qseq)
+        if prev is None or identity > prev[0]:
+            per[region][bgc_id][qseq] = (identity, evalue_f, length_i)
+        if bgc_id not in bgc_info:
+            bgc_info[bgc_id] = {
                 "product": sub.get("product") or "",
                 "cluster_product": (cluster_meta.get(bgc_id) or {}).get("product") or "",
-                "query_cds": qseq,
             }
 
     out: dict[str, list[dict]] = {}
-    for region, hits_dict in by_region.items():
-        ranked = sorted(hits_dict.values(), key=lambda h: h["identity"], reverse=True)[:top_k]
-        out[region] = ranked
+    for region, bgc_map in per.items():
+        n_cds = region_cds_counts.get(region, 0)
+        if n_cds == 0:
+            continue
+        ranked: list[dict] = []
+        for bgc_id, cds_hits in bgc_map.items():
+            best_cds, (best_ident, best_eval, best_len) = max(
+                cds_hits.items(), key=lambda kv: kv[1][0])
+            similarity = sum(v[0] for v in cds_hits.values()) / n_cds
+            info = bgc_info.get(bgc_id, {})
+            ranked.append({
+                "bgc_id": bgc_id,
+                "similarity": round(similarity, 4),
+                "identity": round(best_ident, 4),
+                "genes_matched": len(cds_hits),
+                "genes_total": n_cds,
+                "evalue": best_eval,
+                "alignment_length": best_len,
+                "product": info.get("product", ""),
+                "cluster_product": info.get("cluster_product", ""),
+                "query_cds": best_cds,
+            })
+        ranked.sort(key=lambda h: (h["similarity"], h["identity"]), reverse=True)
+        out[region] = ranked[:top_k]
     return out
 
 
