@@ -512,14 +512,19 @@ def write_extended_outputs_from_gff3(
     pfam_db: Path | None = None,
     hmmer_bin: Path | None = None,
     hmmscan_threads: int = 8,
+    precomputed_flank_domains: dict[str, list[dict[str, Any]]] | None = None,
+    gff_context: tuple[list[CdsRecord], dict[str, list[CdsRecord]]] | None = None,
 ) -> dict[str, Path]:
     contigs = read_fasta(fasta_path)
     core_peptides = load_core_peptides(core_pep_fasta) if core_pep_fasta else {}
-    _records, by_contig, _stats = load_gff3_cds(
-        fasta_path=fasta_path,
-        gff3_path=gff3_path,
-        translation_table=translation_table,
-    )
+    if gff_context is not None:
+        _records, by_contig = gff_context
+    else:
+        _records, by_contig, _stats = load_gff3_cds(
+            fasta_path=fasta_path,
+            gff3_path=gff3_path,
+            translation_table=translation_table,
+        )
     contig_lens = {name: len(seq) for name, seq in contigs.items()}
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -553,6 +558,7 @@ def write_extended_outputs_from_gff3(
             pfam_db=pfam_db,
             hmmer_bin=hmmer_bin,
             threads=hmmscan_threads,
+            precomputed_domains=precomputed_flank_domains,
         )
 
     # Display-only flank CDS: GFF3 genes inside the extended span but not

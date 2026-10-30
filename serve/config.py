@@ -63,6 +63,7 @@ class Settings(BaseSettings):
         alias="PFAM_DB_PATH",
     )
     hmmer_threads: int = Field(default=48, alias="HMMER_THREADS")
+    pfam_scan_workers: int = Field(default=6, alias="PFAM_SCAN_WORKERS")
     default_threshold: float = Field(default=0.95, alias="DEFAULT_THRESHOLD")
     default_extend_threshold: float = Field(default=0.80, alias="DEFAULT_EXTEND_THRESHOLD")
     default_min_support_windows: int = Field(default=3, alias="DEFAULT_MIN_SUPPORT_WINDOWS")
@@ -95,6 +96,8 @@ class Settings(BaseSettings):
     max_fasta_bytes: int = Field(default=50 * 1024 * 1024, alias="MAX_FASTA_BYTES")
     poll_interval_sec: int = Field(default=5, alias="POLL_INTERVAL_SEC")
     heartbeat_sec: int = Field(default=10, alias="HEARTBEAT_SEC")
+    upload_workers: int = Field(default=8, alias="UPLOAD_WORKERS")
+    worker_max_jobs: int = Field(default=2, alias="WORKER_MAX_JOBS")
 
     fasta_bucket: str = Field(default="fasta-uploads", alias="FASTA_BUCKET")
     results_bucket: str = Field(default="results", alias="RESULTS_BUCKET")
@@ -102,6 +105,16 @@ class Settings(BaseSettings):
     resend_api_key: str = Field(default="", alias="RESEND_API_KEY")
     email_from: str = Field(default="Genomine <noreply@genomine.bio>", alias="EMAIL_FROM")
     site_base_url: str = Field(default="https://www.genomine.bio", alias="SITE_BASE_URL")
+
+    ops_monitor_interval_sec: int = Field(default=30, alias="OPS_MONITOR_INTERVAL_SEC")
+    ops_worker_heartbeat_staleness_sec: int = Field(default=120, alias="OPS_WORKER_HEARTBEAT_STALENESS_SEC")
+    feishu_app_id: str = Field(default="", alias="FEISHU_APP_ID")
+    feishu_app_secret: str = Field(default="", alias="FEISHU_APP_SECRET")
+    feishu_chat_id: str = Field(default="", alias="FEISHU_CHAT_ID")
+    feishu_allowed_chat_ids: str = Field(default="", alias="FEISHU_ALLOWED_CHAT_IDS")
+    feishu_queue_alert_threshold: int = Field(default=5, alias="FEISHU_QUEUE_ALERT_THRESHOLD")
+    feishu_alert_cooldown_sec: int = Field(default=3600, alias="FEISHU_ALERT_COOLDOWN_SEC")
+    feishu_daily_summary_time: str = Field(default="09:00", alias="FEISHU_DAILY_SUMMARY_TIME")
 
 
 _cached: Settings | None = None

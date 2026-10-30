@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 
 # Node / Next.js
+.tools/
 web/node_modules/
 web/.next/
 web/out/

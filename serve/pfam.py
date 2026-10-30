@@ -194,6 +194,78 @@ def scan_proteins(*, faa_path: Path, pfam_db: Path, out_tbl: Path,
     return n
 
 
+def scan_proteins_parallel(*, faa_path: Path, pfam_db: Path, out_tbl: Path,
+                           hmmer_bin: Path, threads: int = 48, workers: int = 6,
+                           e_cutoff: float = 1e-5) -> int:
+    if workers <= 1:
+        return scan_proteins(
+            faa_path=faa_path, pfam_db=pfam_db, out_tbl=out_tbl,
+            hmmer_bin=hmmer_bin, threads=threads, e_cutoff=e_cutoff,
+        )
+
+    records: list[str] = []
+    current: list[str] = []
+    with open(faa_path) as handle:
+        for line in handle:
+            if line.startswith(">") and current:
+                records.append("".join(current))
+                current = []
+            current.append(line)
+    if current:
+        records.append("".join(current))
+    if not records:
+        return scan_proteins(
+            faa_path=faa_path, pfam_db=pfam_db, out_tbl=out_tbl,
+            hmmer_bin=hmmer_bin, threads=threads, e_cutoff=e_cutoff,
+        )
+
+    n_shards = min(workers, len(records))
+    shard_records: list[list[str]] = [[] for _ in range(n_shards)]
+    shard_sizes = [0] * n_shards
+    for record in records:
+        aa_size = sum(len(line) for line in record.splitlines()[1:])
+        idx = min(range(n_shards), key=lambda i: shard_sizes[i])
+        shard_records[idx].append(record)
+        shard_sizes[idx] += aa_size
+
+    shard_dir = out_tbl.parent / f"{out_tbl.stem}_shards"
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    shard_faas: list[Path] = []
+    shard_tbls: list[Path] = []
+    for idx, items in enumerate(shard_records):
+        shard_faa = shard_dir / f"query_{idx:02d}.faa"
+        shard_faa.write_text("".join(items))
+        shard_faas.append(shard_faa)
+        shard_tbls.append(shard_dir / f"hits_{idx:02d}.domtbl")
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    threads_per_worker = max(1, threads // n_shards)
+    with ThreadPoolExecutor(max_workers=n_shards) as pool:
+        futures = [
+            pool.submit(
+                scan_proteins,
+                faa_path=shard_faa,
+                pfam_db=pfam_db,
+                out_tbl=shard_tbl,
+                hmmer_bin=hmmer_bin,
+                threads=threads_per_worker,
+                e_cutoff=e_cutoff,
+            )
+            for shard_faa, shard_tbl in zip(shard_faas, shard_tbls)
+        ]
+        hit_counts = [future.result() for future in futures]
+
+    with open(out_tbl, "w") as out_handle:
+        for idx, shard_tbl in enumerate(shard_tbls):
+            with open(shard_tbl) as shard_handle:
+                for line in shard_handle:
+                    if idx > 0 and line.startswith("#"):
+                        continue
+                    out_handle.write(line)
+    return sum(hit_counts)
+
+
 # ── domtblout parser ─────────────────────────────────────────────────────
 
 # Per-domain table layout from `hmmscan --domtblout` (fixed-column whitespace):
@@ -286,7 +358,8 @@ def _extract_regions_proteins_with_meta(regions_gbk: Path, out_faa: Path) -> dic
 def annotate_regions_gbk(*, regions_gbk: Path, pfam_db: Path, work_dir: Path,
                          hmmer_bin: Path, threads: int = 8,
                          e_cutoff: float = 1e-5,
-                         max_domains_per_cds: int = 6) -> dict[str, list[dict]]:
+                         max_domains_per_cds: int = 6,
+                         precomputed_domains: dict[str, list[dict]] | None = None) -> dict[str, list[dict]]:
     """Top-level entry. Returns {region_id: [cds_feature_dict, ...]}.
 
     Each cds_feature_dict has the shape stored in regions.cds_features JSONB.
@@ -300,13 +373,15 @@ def annotate_regions_gbk(*, regions_gbk: Path, pfam_db: Path, work_dir: Path,
         log.info("pfam.annotate: no query CDS in %s", regions_gbk.name)
         return {}
 
-    tbl = work_dir / "pfam_hits.domtbl"
-    n = scan_proteins(faa_path=faa, pfam_db=pfam_db, out_tbl=tbl,
-                      hmmer_bin=hmmer_bin, threads=threads, e_cutoff=e_cutoff)
-    log.info("pfam.annotate: %d significant per-domain hits across %d CDS",
-             n, len(cds_meta))
-
-    domains_by_query = parse_domtblout(tbl)
+    if precomputed_domains is None:
+        tbl = work_dir / "pfam_hits.domtbl"
+        n = scan_proteins(faa_path=faa, pfam_db=pfam_db, out_tbl=tbl,
+                          hmmer_bin=hmmer_bin, threads=threads, e_cutoff=e_cutoff)
+        log.info("pfam.annotate: %d significant per-domain hits across %d CDS",
+                 n, len(cds_meta))
+        domains_by_query = parse_domtblout(tbl)
+    else:
+        domains_by_query = precomputed_domains
 
     by_region: dict[str, list[dict]] = defaultdict(list)
     for key, m in cds_meta.items():

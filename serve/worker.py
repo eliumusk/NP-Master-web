@@ -137,25 +137,53 @@ def main() -> int:
 
     _install_signal_handlers()
 
-    while not _shutdown.is_set():
-        try:
-            job = claim_next_job(supa, settings.worker_id)
-        except Exception as e:
-            log.warning("claim_next_job failed: %s", e)
-            time.sleep(min(30, settings.poll_interval_sec * 4))
-            continue
-
-        if job is None:
-            if args.once:
+    if args.once:
+        while not _shutdown.is_set():
+            try:
+                job = claim_next_job(supa, settings.worker_id)
+            except Exception as e:
+                log.warning("claim_next_job failed: %s", e)
+                time.sleep(min(30, settings.poll_interval_sec * 4))
+                continue
+            if job is None:
                 log.info("--once: no job available, exiting")
                 return 0
-            time.sleep(settings.poll_interval_sec)
-            continue
-
-        _process_one_job(supa, settings, job)
-
-        if args.once:
+            _process_one_job(supa, settings, job)
             return 0
+        return 0
+
+    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+
+    max_jobs = max(1, settings.worker_max_jobs)
+    pending = set()
+    with ThreadPoolExecutor(max_workers=max_jobs) as pool:
+        while pending or not _shutdown.is_set():
+            claim_failed = False
+            while not _shutdown.is_set() and len(pending) < max_jobs:
+                try:
+                    job = claim_next_job(supa, settings.worker_id)
+                except Exception as e:
+                    claim_failed = True
+                    log.warning("claim_next_job failed: %s", e)
+                    break
+                if job is None:
+                    break
+                log.info("scheduling job %s (%d/%d active)", job["id"], len(pending) + 1, max_jobs)
+                pending.add(pool.submit(_process_one_job, make_client(settings), settings, job))
+
+            if not pending:
+                if _shutdown.is_set():
+                    break
+                time.sleep(min(30, settings.poll_interval_sec * 4) if claim_failed else settings.poll_interval_sec)
+                continue
+
+            done, _ = wait(pending, timeout=settings.poll_interval_sec, return_when=FIRST_COMPLETED)
+            pending.difference_update(done)
+            for future in done:
+                try:
+                    future.result()
+                except Exception as e:
+                    log.exception("job future escaped its error handler: %s", e)
 
     log.info("graceful shutdown complete")
     return 0

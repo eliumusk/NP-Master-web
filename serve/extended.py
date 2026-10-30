@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -31,23 +32,108 @@ def read_fasta(path: Path) -> dict[str, str]:
     return contigs
 
 
-def _run_prodigal(prodigal_bin: Path, fasta_path: Path, out_dir: Path) -> tuple[Path, Path]:
+def _run_prodigal(prodigal_bin: Path, fasta_path: Path, out_dir: Path,
+                  workers: int = 6) -> tuple[Path, Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
     faa = out_dir / "all_cds.faa"
     fna = out_dir / "all_cds.fna"
     gff = out_dir / "all_cds.gff"
-    cmd = [
-        str(prodigal_bin),
-        "-p", "meta",
-        "-q",
-        "-i", str(fasta_path),
-        "-a", str(faa),
-        "-d", str(fna),
-        "-o", str(gff),
-        "-f", "gff",
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise RuntimeError(f"prodigal failed:\n{proc.stderr[-2000:]}")
+
+    def run(input_path: Path, faa_path: Path, fna_path: Path, gff_path: Path) -> None:
+        cmd = [
+            str(prodigal_bin),
+            "-p", "meta",
+            "-q",
+            "-i", str(input_path),
+            "-a", str(faa_path),
+            "-d", str(fna_path),
+            "-o", str(gff_path),
+            "-f", "gff",
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(f"prodigal failed:\n{proc.stderr[-2000:]}")
+
+    contigs = read_fasta(fasta_path)
+    if workers <= 1 or len(contigs) <= 1:
+        run(fasta_path, faa, fna, gff)
+        return faa, fna
+
+    n_shards = min(workers, len(contigs))
+    shard_contigs: list[list[str]] = [[] for _ in range(n_shards)]
+    shard_sizes = [0] * n_shards
+    for contig, sequence in contigs.items():
+        idx = min(range(n_shards), key=lambda i: shard_sizes[i])
+        shard_contigs[idx].append(contig)
+        shard_sizes[idx] += len(sequence)
+
+    shard_dir = out_dir / "_shards"
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    shard_paths: list[tuple[Path, Path, Path]] = []
+    for idx, names in enumerate(shard_contigs):
+        shard_fasta = shard_dir / f"input_{idx:02d}.fna"
+        with open(shard_fasta, "w") as handle:
+            for name in names:
+                handle.write(f">{name}\n{wrap_fasta(contigs[name])}\n")
+        shard_paths.append((
+            shard_dir / f"all_{idx:02d}.faa",
+            shard_dir / f"all_{idx:02d}.fna",
+            shard_dir / f"all_{idx:02d}.gff",
+        ))
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=n_shards) as pool:
+        futures = [
+            pool.submit(run, shard_fasta, *paths)
+            for shard_fasta, paths in zip(
+                [shard_dir / f"input_{idx:02d}.fna" for idx in range(n_shards)],
+                shard_paths,
+            )
+        ]
+        for future in futures:
+            future.result()
+
+    def merge_fasta(paths: list[Path], dest: Path) -> None:
+        by_shard: list[dict[str, list[str]]] = []
+        for path in paths:
+            by_contig: dict[str, list[str]] = {}
+            contig = ""
+            with open(path) as handle:
+                for line in handle:
+                    if line.startswith(">"):
+                        gene_id = line[1:].split()[0]
+                        contig = gene_id.rsplit("_", 1)[0]
+                    by_contig.setdefault(contig, []).append(line)
+            by_shard.append(by_contig)
+        with open(dest, "w") as out_handle:
+            for seqnum, contig in enumerate(contigs, start=1):
+                for by_contig in by_shard:
+                    for line in by_contig.get(contig, []):
+                        if line.startswith(">"):
+                            line = re.sub(r"ID=\d+_", f"ID={seqnum}_", line)
+                        out_handle.write(line)
+
+    merge_fasta([paths[0] for paths in shard_paths], faa)
+    merge_fasta([paths[1] for paths in shard_paths], fna)
+
+    gff_by_shard: list[dict[str, list[str]]] = []
+    for _, _, path in shard_paths:
+        by_contig: dict[str, list[str]] = {}
+        with open(path) as handle:
+            for line in handle:
+                if not line.startswith("#") and line.strip():
+                    by_contig.setdefault(line.split("\t", 1)[0], []).append(line)
+        gff_by_shard.append(by_contig)
+    with open(gff, "w") as out_handle:
+        with open(shard_paths[0][2]) as first_gff:
+            for line in first_gff:
+                if line.startswith("#"):
+                    out_handle.write(line)
+        for seqnum, contig in enumerate(contigs, start=1):
+            for by_contig in gff_by_shard:
+                for line in by_contig.get(contig, []):
+                    out_handle.write(re.sub(r"ID=\d+_", f"ID={seqnum}_", line))
     return faa, fna
 
 
@@ -110,6 +196,27 @@ def _biosynth_terms() -> list[str]:
     return terms
 
 
+def collect_flank_candidates(
+    *,
+    rows: list[dict[str, Any]],
+    genes_by_contig: dict[str, list[dict[str, Any]]],
+    search_bp: int = 25_000,
+) -> dict[str, dict[str, Any]]:
+    candidates: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        contig = str(row["contig"])
+        start = int(row["start"])
+        end = int(row["end"])
+        for gene in genes_by_contig.get(contig, []):
+            g_start = int(gene["start"])
+            g_end = int(gene["end"])
+            near_left = g_start < start and g_end > start - search_bp
+            near_right = g_start < end + search_bp and g_end > end
+            if (near_left or near_right) and str(gene.get("sequence") or ""):
+                candidates[str(gene["locus_tag"])] = gene
+    return candidates
+
+
 def apply_evidence_extension(
     *,
     rows: list[dict[str, Any]],
@@ -124,6 +231,7 @@ def apply_evidence_extension(
     search_bp: int = 25_000,
     max_gap_bp: int = 3_000,
     max_non_biosynth_run: int = 2,
+    precomputed_domains: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Extend ext_start/ext_end beyond the fixed flank using Pfam evidence.
 
@@ -159,22 +267,13 @@ def apply_evidence_extension(
 
     # Only boundary-neighbouring CDS are scanned: a genome-wide hmmscan
     # against Pfam-A would be far too slow.
-    candidates: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        contig = str(row["contig"])
-        start = int(row["start"])
-        end = int(row["end"])
-        for gene in genes_by_contig.get(contig, []):
-            g_start = int(gene["start"])
-            g_end = int(gene["end"])
-            near_left = g_start < start and g_end > start - search_bp
-            near_right = g_start < end + search_bp and g_end > end
-            if (near_left or near_right) and str(gene.get("sequence") or ""):
-                candidates[str(gene["locus_tag"])] = gene
+    candidates = collect_flank_candidates(
+        rows=rows, genes_by_contig=genes_by_contig, search_bp=search_bp,
+    )
 
     biosynth_ids: set[str] = set()
-    domains_by_query: dict[str, list[dict[str, Any]]] = {}
-    if candidates:
+    domains_by_query = precomputed_domains if precomputed_domains is not None else {}
+    if candidates and precomputed_domains is None:
         work_dir.mkdir(parents=True, exist_ok=True)
         faa = work_dir / "flank_candidates.faa"
         tbl = work_dir / "flank_candidates.domtbl"
@@ -197,6 +296,7 @@ def apply_evidence_extension(
         except Exception as exc:
             log.warning("evidence extension hmmscan failed (%s); keeping fixed flank", exc)
             return {}
+    if candidates:
         from .safe import has_any
 
         for tag, hits in domains_by_query.items():
@@ -316,6 +416,12 @@ def write_extended_outputs(
     pfam_db: Path | None = None,
     hmmer_bin: Path | None = None,
     hmmscan_threads: int = 8,
+    precomputed_flank_domains: dict[str, list[dict[str, Any]]] | None = None,
+    prodigal_context: tuple[
+        dict[str, dict[str, Any]],
+        dict[str, dict[str, Any]],
+        dict[str, list[tuple[str, dict[str, Any]]]],
+    ] | None = None,
 ) -> dict[str, Path]:
     """Write extended safe-pass region DNA and CDS outputs.
 
@@ -347,7 +453,9 @@ def write_extended_outputs(
     aa: dict[str, dict[str, Any]] = {}
     nt: dict[str, dict[str, Any]] = {}
     genes_by_contig: dict[str, list[tuple[str, dict[str, Any]]]] = {}
-    if safe_rows:
+    if prodigal_context is not None:
+        aa, nt, genes_by_contig = prodigal_context
+    elif safe_rows:
         work_dir = out_dir / "_prodigal"
         work_dir.mkdir(parents=True, exist_ok=True)
         faa_all, fna_all = _run_prodigal(prodigal_bin, fasta_path, work_dir)
@@ -378,6 +486,7 @@ def write_extended_outputs(
             pfam_db=pfam_db,
             hmmer_bin=hmmer_bin,
             threads=hmmscan_threads,
+            precomputed_domains=precomputed_flank_domains,
         )
 
     # Display-only flank CDS: prodigal genes inside the extended span but not

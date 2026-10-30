@@ -23,6 +23,7 @@ from .client import (
     insert_pfam_rows,
     insert_region_rows,
     list_job_genomes,
+    make_client,
     update_genome,
     update_job,
     upload_object,
@@ -479,11 +480,13 @@ def _annotate_and_classify(
         except Exception as exc:
             log.warning("genbank generation failed; type/safe evidence will be weaker: %s", exc)
 
-    if gbk_path and gbk_path.exists() and settings.mibig_dmnd_path.exists():
+    def run_mibig() -> dict[str, list[dict[str, Any]]]:
+        if not (gbk_path and gbk_path.exists() and settings.mibig_dmnd_path.exists()):
+            return {}
         try:
             from .mibig import search_regions_against_mibig
 
-            mibig_hits = search_regions_against_mibig(
+            return search_regions_against_mibig(
                 regions_gbk=gbk_path,
                 dmnd_db=settings.mibig_dmnd_path,
                 meta_json=settings.mibig_meta_path,
@@ -493,24 +496,58 @@ def _annotate_and_classify(
             )
         except Exception as exc:
             log.warning("MIBiG search failed; continuing without nearest-neighbor hits: %s", exc)
+            return {}
 
-    pfam_tbl: Path | None = None
-    if gbk_path and gbk_path.exists() and settings.pfam_db_path.exists():
+    pfam_shared: dict[str, Any] = {}
+
+    def run_core_pfam() -> tuple[dict[str, list[dict[str, Any]]], Path | None]:
+        if not (gbk_path and gbk_path.exists() and settings.pfam_db_path.exists()):
+            return {}, None
         try:
             from .pfam import annotate_regions_gbk
+            from .pfam_batch import prepare_pfam_batch
 
             pfam_work = results_dir / "_pfam_work"
-            cds_by_region = annotate_regions_gbk(
+            batch = None
+            if raw_rows and evidence_extend:
+                try:
+                    batch = prepare_pfam_batch(
+                        fasta_path=fasta_path,
+                        gff3_path=gff3_path,
+                        rows=raw_rows,
+                        regions_gbk=gbk_path,
+                        results_dir=results_dir,
+                        pfam_db=settings.pfam_db_path,
+                        hmmer_bin=settings.hmmer_bin,
+                        prodigal_bin=settings.prodigal_bin,
+                        threads=settings.hmmer_threads,
+                        scan_workers=settings.pfam_scan_workers,
+                    )
+                    pfam_shared["batch"] = batch
+                except Exception as exc:
+                    log.warning("combined Pfam scan failed; falling back to separate scans: %s", exc)
+            cds = annotate_regions_gbk(
                 regions_gbk=gbk_path,
                 pfam_db=settings.pfam_db_path,
                 work_dir=pfam_work,
                 hmmer_bin=settings.hmmer_bin,
                 threads=settings.hmmer_threads,
+                precomputed_domains=batch.domains_by_query if batch else None,
             )
             candidate = pfam_work / "pfam_hits.domtbl"
-            pfam_tbl = candidate if candidate.exists() else None
+            return cds, candidate if candidate.exists() else None
         except Exception as exc:
             log.warning("Pfam annotation failed; continuing without domain evidence: %s", exc)
+            pfam_shared.clear()
+            return {}, None
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        mibig_future = pool.submit(run_mibig)
+        pfam_future = pool.submit(run_core_pfam)
+        mibig_hits = mibig_future.result()
+        cds_by_region, pfam_tbl = pfam_future.result()
 
     typed = {row["bgc_id"]: {} for row in raw_rows}
     if raw_rows and settings.type_head_joblib.exists():
@@ -563,6 +600,7 @@ def _annotate_and_classify(
         row.update(safe)
         out_rows.append(row)
 
+    pfam_batch = pfam_shared.get("batch")
     if gff3_path and gff3_path.exists():
         from .gff3 import write_extended_outputs_from_gff3
 
@@ -577,6 +615,9 @@ def _annotate_and_classify(
             evidence_extend=evidence_extend,
             pfam_db=settings.pfam_db_path,
             hmmer_bin=settings.hmmer_bin,
+            hmmscan_threads=settings.hmmer_threads,
+            precomputed_flank_domains=pfam_batch.domains_by_query if pfam_batch else None,
+            gff_context=pfam_batch.gff_context if pfam_batch else None,
         )
     else:
         write_extended_outputs(
@@ -589,6 +630,9 @@ def _annotate_and_classify(
             evidence_extend=evidence_extend,
             pfam_db=settings.pfam_db_path,
             hmmer_bin=settings.hmmer_bin,
+            hmmscan_threads=settings.hmmer_threads,
+            precomputed_flank_domains=pfam_batch.domains_by_query if pfam_batch else None,
+            prodigal_context=pfam_batch.prodigal_context if pfam_batch else None,
         )
     return out_rows, cds_by_region, mibig_hits, gbk_path, pfam_tbl
 
@@ -799,7 +843,10 @@ def _process_genome(supa: Any, settings: Settings, job: dict[str, Any], genome: 
 
     update_genome(supa, genome_id, status="running", started_at=_now(), error=None)
     update_job(supa, job_id, log_tail=f"{genome_name}: 下载 FASTA")
-    fasta_path = _prepare_fasta(supa, settings, genome)
+    from .locks import feature_lock
+
+    with feature_lock(sha):
+        fasta_path = _prepare_fasta(supa, settings, genome)
     gff3_path = _prepare_gff3(supa, settings, genome)
     core_pep_path = _prepare_core_pep(supa, settings, genome)
     if gff3_path:
@@ -815,44 +862,48 @@ def _process_genome(supa: Any, settings: Settings, job: dict[str, Any], genome: 
     if used_precomputed_probs:
         update_job(supa, job_id, log_tail=f"{genome_name}: 使用预计算 U-Net 结果")
     else:
-        if settings.use_feature_cache:
-            features_dir = settings.npmaster_cache_dir / "features" / sha
-            cache_hit = feature_cache_lookup(supa, sha) and (features_dir / "DONE").exists()
-        else:
-            features_dir = settings.npmaster_cache_dir / "features_uncached" / job_id / genome_name
-            shutil.rmtree(features_dir, ignore_errors=True)
-            cache_hit = False
+        from .locks import feature_lock, gpu_stage_lock
 
-        if not cache_hit:
-            # The VRAM guard only makes sense for the cold-start path; resident
-            # daemons legitimately hold GPU memory between jobs.
-            if not _daemon_available(settings):
-                update_job(supa, job_id, log_tail=f"{genome_name}: 等待 GPU（Evo2 特征提取）")
-                if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
-                    raise GpuBusyTimeout("gpu busy timeout before extract")
-            update_job(supa, job_id, log_tail=f"{genome_name}: 提取 Evo2 特征")
-            try:
-                _extract(settings, fasta_path, features_dir, stem)
-            except Exception:
-                shutil.rmtree(features_dir, ignore_errors=True)
-                raise
-            (features_dir / "DONE").touch()
+        update_job(supa, job_id, log_tail=f"{genome_name}: 等待 GPU 阶段")
+        with gpu_stage_lock(), feature_lock(sha):
             if settings.use_feature_cache:
-                feature_cache_insert(
-                    supa,
-                    sha,
-                    str(features_dir),
-                    sum(p.stat().st_size for p in features_dir.rglob("*") if p.is_file()),
-                )
-        else:
-            log.info("feature cache hit for %s", sha[:8])
+                features_dir = settings.npmaster_cache_dir / "features" / sha
+                cache_hit = feature_cache_lookup(supa, sha) and (features_dir / "DONE").exists()
+            else:
+                features_dir = settings.npmaster_cache_dir / "features_uncached" / job_id / genome_name
+                shutil.rmtree(features_dir, ignore_errors=True)
+                cache_hit = False
 
-        if not _daemon_available(settings):
-            update_job(supa, job_id, log_tail=f"{genome_name}: 等待 GPU（U-Net 推理）")
-            if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
-                raise GpuBusyTimeout("gpu busy timeout before U-Net inference")
-        update_job(supa, job_id, log_tail=f"{genome_name}: 运行 U-Net 推理")
-        _infer(settings, features_dir, probs_dir, stem)
+            if not cache_hit:
+                # The VRAM guard only makes sense for the cold-start path; resident
+                # daemons legitimately hold GPU memory between jobs.
+                if not _daemon_available(settings):
+                    update_job(supa, job_id, log_tail=f"{genome_name}: 等待 GPU（Evo2 特征提取）")
+                    if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
+                        raise GpuBusyTimeout("gpu busy timeout before extract")
+                update_job(supa, job_id, log_tail=f"{genome_name}: 提取 Evo2 特征")
+                try:
+                    _extract(settings, fasta_path, features_dir, stem)
+                except Exception:
+                    shutil.rmtree(features_dir, ignore_errors=True)
+                    raise
+                (features_dir / "DONE").touch()
+                if settings.use_feature_cache:
+                    feature_cache_insert(
+                        supa,
+                        sha,
+                        str(features_dir),
+                        sum(p.stat().st_size for p in features_dir.rglob("*") if p.is_file()),
+                    )
+            else:
+                log.info("feature cache hit for %s", sha[:8])
+
+            if not _daemon_available(settings):
+                update_job(supa, job_id, log_tail=f"{genome_name}: 等待 GPU（U-Net 推理）")
+                if not wait_for_gpu(settings.gpu_min_free_gb, settings.gpu_wait_timeout_sec, settings.gpu_poll_sec):
+                    raise GpuBusyTimeout("gpu busy timeout before U-Net inference")
+            update_job(supa, job_id, log_tail=f"{genome_name}: 运行 U-Net 推理")
+            _infer(settings, features_dir, probs_dir, stem)
 
     results_dir = settings.npmaster_cache_dir / "results" / job_id / genome_name
     raw_csv = results_dir / "regions_raw.csv"
@@ -965,20 +1016,31 @@ def _process_genome(supa: Any, settings: Settings, job: dict[str, Any], genome: 
     if pfam_tbl and pfam_tbl.exists():
         artifact_specs.append(("pfam_domtbl", pfam_tbl, "text/plain"))
 
-    for kind, path, content_type in artifact_specs:
-        if not path.exists():
-            continue
-        key = f"{base_key}/{path.name}"
-        artifacts[kind] = _upload_artifact(
-            supa,
+    pending_uploads = [
+        (kind, path, content_type)
+        for kind, path, content_type in artifact_specs
+        if path.exists()
+    ]
+
+    def upload_one(spec: tuple[str, Path, str]) -> tuple[str, str]:
+        kind, path, content_type = spec
+        key = _upload_artifact(
+            make_client(settings),
             settings,
             job_id=job_id,
             genome_id=genome_id,
             kind=kind,
-            key=key,
+            key=f"{base_key}/{path.name}",
             path=path,
             content_type=content_type,
         )
+        return kind, key
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=max(1, settings.upload_workers)) as pool:
+        for kind, key in pool.map(upload_one, pending_uploads):
+            artifacts[kind] = key
 
     n_regions = len(rows)
     n_safe = sum(1 for row in rows if bool(row.get("safe_pass")))
