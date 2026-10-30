@@ -1,0 +1,57 @@
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { cookies } from "next/headers";
+import { cache } from "react";
+
+type CookieToSet = { name: string; value: string; options?: CookieOptions };
+
+export function getPublicSupabaseKey() {
+  return process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+    ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    ?? "";
+}
+
+export function hasPublicSupabaseConfig() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = getPublicSupabaseKey();
+  return !!url && !!key && !url.includes("YOUR-PROJECT") && key !== "ey..." && key.length > 20;
+}
+
+// Deduped per request: layout and page both call this, so without cache()
+// each render pass would hit the Supabase Auth API more than once.
+export const getOptionalUser = cache(async () => {
+  if (!hasPublicSupabaseConfig()) return null;
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    return user;
+  } catch {
+    return null;
+  }
+});
+
+export async function createClient() {
+  const cookieStore = await cookies();
+  return createServerClient(
+    (process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes("YOUR-PROJECT")
+      ? process.env.NEXT_PUBLIC_SUPABASE_URL
+      : process.env.SUPABASE_URL)!,
+    getPublicSupabaseKey(),
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet: CookieToSet[]) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options),
+            );
+          } catch {
+            // Ignored: setAll is called from a Server Component where mutating
+            // cookies is not allowed. Middleware refreshes the session anyway.
+          }
+        },
+      },
+    },
+  );
+}

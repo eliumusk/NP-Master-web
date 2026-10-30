@@ -1,31 +1,32 @@
 # Python
 __pycache__/
-*.pyc
-.venv-serve/
+*.py[cod]
 .pytest_cache/
+.benchmarks/
+
+# Local tools, virtual environments and archives
+.local/
 
 # Node / Next.js
-.tools/
-web/node_modules/
-web/.next/
-web/out/
-web/.vercel
-web/*.tsbuildinfo
-web/next-env.d.ts
+apps/web/node_modules/
+apps/web/.next/
+apps/web/out/
+apps/web/.vercel/
+apps/web/*.tsbuildinfo
+apps/web/next-env.d.ts
 
-# Env / secrets
+# Environment and secrets
 .env
-serve/.env
+backend/.env
 **/.env.local
 
-# Worker scratch
-cache/
+# Production runtime data
+runtime/cache/
+runtime/data/
 *.log
 
-# Local data caches (should not be in git)
-cache/
-data/
-serve/.env
-.venv-serve/
-supabase/.temp/
-manual_runs/
+# Independent Feishu Miaoda repository
+apps/genomine-ops-monitor/
+
+# Supabase CLI state
+infra/supabase/.temp/

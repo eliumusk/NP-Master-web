@@ -1,0 +1,19 @@
+[Unit]
+Description=Genomine operations monitor and Feishu alerts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/data/syh/NP-Master-web
+EnvironmentFile=/data/syh/NP-Master-web/backend/.env
+EnvironmentFile=/data/syh/NP-Master-web/backend/runtime.env
+ExecStart=/data/syh/NP-Master-web/.local/venv/bin/python -m backend.ops_monitor
+Restart=always
+RestartSec=15
+Nice=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,20 @@
+[Unit]
+Description=Genomine GPU worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/data/syh/NP-Master-web
+EnvironmentFile=/data/syh/NP-Master-web/backend/.env
+EnvironmentFile=/data/syh/NP-Master-web/backend/runtime.env
+ExecStart=/data/syh/NP-Master-web/.local/venv/bin/python -m backend.worker
+Restart=on-failure
+RestartSec=15
+Nice=10
+IOSchedulingClass=idle
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
