@@ -98,6 +98,14 @@ def _short_stem(sha256: str) -> str:
     return sha256[:16]
 
 
+def _publish_pfam_table(pfam_tbl: Path | None, results_dir: Path) -> Path | None:
+    if pfam_tbl is None or not pfam_tbl.exists() or pfam_tbl.parent == results_dir:
+        return pfam_tbl
+    published = results_dir / "pfam_hits.domtbl"
+    shutil.copy2(pfam_tbl, published)
+    return published
+
+
 def _subprocess_env(python_bin: Path) -> dict[str, str]:
     env = os.environ.copy()
     env_root = python_bin.parent.parent
@@ -952,6 +960,7 @@ def _process_genome(supa: Any, settings: Settings, job: dict[str, Any], genome: 
         safe_tier_min=str(job.get("safe_tier_min") or settings.default_safe_tier_min),
         extend_flank_bp=int(job.get("extend_flank_bp") or settings.default_extend_flank_bp),
     )
+    pfam_tbl = _publish_pfam_table(pfam_tbl, results_dir)
 
     regions_csv = results_dir / "regions.csv"
     _write_csv(regions_csv, rows, [

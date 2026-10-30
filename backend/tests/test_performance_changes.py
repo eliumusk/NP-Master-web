@@ -3,6 +3,20 @@ from pathlib import Path
 from backend import pfam_batch
 from backend.extended import apply_evidence_extension
 from backend.pfam import annotate_regions_gbk
+from backend.pipeline import _publish_pfam_table
+
+
+def test_pfam_table_is_published_into_results_root(tmp_path: Path):
+    work_dir = tmp_path / "results" / "_pfam_work"
+    work_dir.mkdir(parents=True)
+    source = work_dir / "pfam_hits.domtbl"
+    source.write_text("pfam-row\n")
+
+    published = _publish_pfam_table(source, tmp_path / "results")
+
+    assert published == tmp_path / "results" / "pfam_hits.domtbl"
+    assert published is not None
+    assert published.read_text() == "pfam-row\n"
 
 
 def test_combined_pfam_scan_feeds_core_and_flank(tmp_path: Path, monkeypatch):
