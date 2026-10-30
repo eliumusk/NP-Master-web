@@ -82,7 +82,7 @@ npm run build:prod
 
 - 主仓库：`https://github.com/eliumusk/NP-Master-web.git`
 - 主网站：Vercel 项目 `np-master-web`，线上域名为 `https://www.genomine.bio`
-- 下一次部署前，Vercel Root Directory 必须设置为 `apps/web`
+- Vercel Root Directory 已设置为 `apps/web`；调整目录时需同步更新项目设置
 - 妙搭应用：独立飞书 Git 仓库和独立发布流程
 - 不提交密钥、Vercel 关联目录、依赖目录、构建产物、生产数据或本地归档
 - 数据库变更通过经过审核的迁移执行；不要用本地迁移目录直接覆盖远端历史

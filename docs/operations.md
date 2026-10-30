@@ -13,7 +13,7 @@
 
 线上域名响应包含 `server: Vercel`，本地 `apps/web/` 保留了原项目的关联文件。Vercel 构建使用 `npm run build`，环境变量在 Vercel 项目设置中维护。
 
-**下一次 Git 部署前，必须将 Vercel 项目的 Root Directory 从 `web` 改为 `apps/web`。** 目录整理不自动修改 Vercel 远端设置，也不代表已经部署。Git 分支与自动生产部署的对应关系以 Vercel 项目的 Git 设置为准。
+Vercel 项目的 Root Directory 已设置为 `apps/web`，GitHub `main` 分支会触发生产部署。后续调整目录时需同步更新 Vercel 项目设置；仅提交或推送代码不等于部署已经成功，仍需确认部署状态。
 
 ### Python Worker
 
