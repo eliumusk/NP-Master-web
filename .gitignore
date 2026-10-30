@@ -23,6 +23,7 @@ backend/.env
 # Production runtime data
 runtime/cache/
 runtime/data/
+runtime/tmp/
 *.log
 
 # Independent Feishu Miaoda repository
