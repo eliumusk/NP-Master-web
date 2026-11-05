@@ -46,19 +46,7 @@ cd /data/genomine
 git clone https://github.com/eliumusk/NP-Master-web.git
 git clone https://github.com/eliumusk/npmaster.git
 
-mkdir -p \
-  /data/genomine/models/hub \
-  /data/genomine/npmaster/experiments/evo2_per_token_unet/train_runs/full_weakneg_bce_w05_ddp4_gb64_seed0 \
-  /data/genomine/npmaster/experiments/evo2_mibig_type/run_full \
-  /data/genomine/NP-Master-web/runtime/data
-
-rsync -a --info=progress2 \
-  "$OLD:/data/muskliu/npmaster/experiments/evo2_per_token_unet/train_runs/full_weakneg_bce_w05_ddp4_gb64_seed0/best.pt" \
-  /data/genomine/npmaster/experiments/evo2_per_token_unet/train_runs/full_weakneg_bce_w05_ddp4_gb64_seed0/
-
-rsync -a --info=progress2 \
-  "$OLD:/data/muskliu/npmaster/experiments/evo2_mibig_type/run_full/type_head.joblib" \
-  /data/genomine/npmaster/experiments/evo2_mibig_type/run_full/
+mkdir -p /data/genomine/models/hub /data/genomine/NP-Master-web/runtime/data
 
 rsync -a --info=progress2 \
   "$OLD:/data/public_models/hub/models--arcinstitute--evo2_7b" \
@@ -73,7 +61,7 @@ rsync -a --info=progress2 \
   /data/genomine/NP-Master-web/runtime/data/
 ```
 
-共约 18 GB。不要复制 `npmaster/data`、训练数据、历史实验或 `runtime/cache`。传输后用 `sha256sum` 核对两个权重文件。
+`best.pt` 和 `type_head.joblib` 已包含在 `npmaster` Git 仓库中。这里只需复制约 18 GB 的 Evo2 和注释数据库。不要复制 `npmaster/data`、训练数据、历史实验或 `runtime/cache`。
 
 ## 3. 部署网站与 Worker
 
