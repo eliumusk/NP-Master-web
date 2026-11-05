@@ -78,6 +78,10 @@ npm run eslint
 npm run build:prod
 ```
 
+## 服务交接
+
+新维护人自托管部署网站、GPU Worker、模型和 Supabase 配置的完整步骤见 [docs/handover.md](docs/handover.md)。生产权重与 GPU 环境说明见模型仓库的 README 和 `environment.yml`。
+
 ## Git 与发布边界
 
 - 主仓库：`https://github.com/eliumusk/NP-Master-web.git`

@@ -1,50 +1,40 @@
-# Genomine 交接：自托管版
+# Genomine 接手部署指南
 
-目标：Next.js 网站和 GPU Worker 都部署到新服务器；Supabase 沿用现有项目。
+这份文档给**新维护人**使用。你负责在新服务器完成部署；原负责人只需提供账号邀请、旧服务器 SSH 登录方式和域名授权码。
 
-## 接手人先回复群里
+## 当前情况
 
-```text
-GitHub 账号/邮箱：
-Supabase 接收邀请的邮箱：
-新服务器公网 IP：
-SSH 端口和用户名：
-服务器所在国家/地区：
-GPU 型号、数量、单卡显存：
-CUDA/驱动版本：
-可用磁盘和部署目录：
-网站是否由你们配置 Nginx/Caddy 和 HTTPS：
-计划使用哪家域名注册商（不迁移注册商则填“暂不迁移”）：
-可切换时间：
-```
+- 网站：Next.js 15，当前由 Vercel 托管，最终迁到你的服务器。
+- 数据库和文件存储：继续使用现有 Supabase，不需要迁移数据库。
+- 代码：以下两个公开仓库的 `main` 分支：
+  - `https://github.com/eliumusk/NP-Master-web.git`
+  - `https://github.com/eliumusk/npmaster.git`
+- 旧服务器：`root@221.194.152.152`，SSH 端口 `2222`。
+- 新服务器：`/data/genomine`，1 张 GPU，使用 Nginx/Caddy 配置 HTTPS。
+- 新服务器公网 IP 尚未提供，不影响先部署；切换域名前必须确认。
+- U-Net `best.pt` 和类型模型 `type_head.joblib` 已在 `npmaster` 仓库，不需要单独传输。
 
-不要在群里发密码、私钥或 Supabase service role key。
+## 1. 接受权限并拉取代码
 
-## 1. 账号与代码
-
-1. 原负责人邀请接手人进入现有 Supabase Organization。
-2. 原负责人整理并推送两个仓库，把最终 commit 发群里：
-   - `https://github.com/eliumusk/NP-Master-web.git`
-   - `https://github.com/eliumusk/npmaster.git`
-3. 原负责人提供 GPU Conda 环境 `evo2_bgc` 的环境导出文件或安装步骤。
-4. 新服务器安装 Node.js 20+、Python、rsync、Prodigal、DIAMOND、HMMER，并准备 PyTorch/Evo2 GPU 环境。
-
-## 2. 两台服务器直接传文件
-
-旧服务器 SSH 地址为 `221.194.152.152`，本机 sshd 监听端口为 `2222`。新服务器只要能访问旧服务器 SSH，就可以主动拉取，不要求旧服务器反向访问新服务器。
-
-以下命令在**新服务器**执行。旧服务器登录用户为 `root`，新服务器先配置好可登录旧服务器的 SSH 密钥。
+接受两个 GitHub 仓库邀请和 Supabase Organization 邀请。向原负责人获取能登录旧服务器的 SSH 方式，然后在新服务器执行：
 
 ```bash
-OLD_USER='root'
-OLD="$OLD_USER@221.194.152.152"
-export RSYNC_RSH='ssh -p 2222'
-
-ssh -p 2222 "$OLD" true
+ssh -p 2222 root@221.194.152.152 true
 mkdir -p /data/genomine
 cd /data/genomine
 git clone https://github.com/eliumusk/NP-Master-web.git
 git clone https://github.com/eliumusk/npmaster.git
+```
+
+如果 SSH 测试失败，先解决新服务器到旧服务器 `221.194.152.152:2222` 的连接，再继续。
+
+## 2. 复制运行资产和现有配置
+
+在**新服务器**执行：
+
+```bash
+OLD='root@221.194.152.152'
+export RSYNC_RSH='ssh -p 2222'
 
 mkdir -p /data/genomine/models/hub /data/genomine/NP-Master-web/runtime/data
 
@@ -59,45 +49,76 @@ rsync -a --info=progress2 \
 rsync -a --info=progress2 \
   "$OLD:/data/syh/NP-Master-web/runtime/data/mibig" \
   /data/genomine/NP-Master-web/runtime/data/
-```
-
-`best.pt` 和 `type_head.joblib` 已包含在 `npmaster` Git 仓库中。这里只需复制约 18 GB 的 Evo2 和注释数据库。不要复制 `npmaster/data`、训练数据、历史实验或 `runtime/cache`。
-
-## 3. 部署网站与 Worker
-
-### 配置
-
-旧服务器已经存在两份完整配置，可用上一节的 SSH 连接直接复制到**新服务器**，不用逐项手抄密钥：
-
-```bash
-OLD_USER='root'
-export RSYNC_RSH='ssh -p 2222'
-OLD="$OLD_USER@221.194.152.152"
 
 rsync -a "$OLD:/data/syh/NP-Master-web/backend/.env" \
   /data/genomine/NP-Master-web/backend/.env
 rsync -a "$OLD:/data/syh/NP-Master-web/apps/web/.env.local" \
   /data/genomine/NP-Master-web/apps/web/.env.local
-chmod 600 /data/genomine/NP-Master-web/backend/.env \
-  /data/genomine/NP-Master-web/apps/web/.env.local
 ```
 
-然后修改配置中的旧路径和 GPU 参数：
+复制内容包括约 13 GB Evo2-7B、Pfam、MIBiG 和现有 Supabase 配置。不要复制 `npmaster/data`、训练数据、历史实验或 `runtime/cache`。
 
-- `backend/runtime.env`：把 `/data/syh/...` 改为 `/data/genomine/NP-Master-web/...`。
-- `NPMASTER_REPO_ROOT=/data/genomine/npmaster`
-- `HF_HUB_CACHE=/data/genomine/models/hub`，`HF_HUB_OFFLINE=1`
-- `EXTRACT_HOSTS=localhost`，GPU 数量按新服务器调整。
-- `USE_PRECOMPUTED_9G_PROBS=false`
+## 3. 安装运行环境
 
-环境文件通过 SSH 直传即可，不提交 Git。SSH 使用新临时密钥，不使用聊天中发送过的私钥。
-
-### 构建与检查
+安装 Node.js 20+、Miniconda、Python 和 rsync，然后执行：
 
 ```bash
+conda env create -p /data/genomine/conda/evo2_bgc \
+  -f /data/genomine/npmaster/environment.yml
+
+conda create -p /data/genomine/conda/tools \
+  -c conda-forge -c bioconda prodigal diamond hmmer -y
+
 cd /data/genomine/NP-Master-web
 python3 -m venv .local/venv
 .local/venv/bin/pip install -r backend/requirements.txt
+```
+
+`environment.yml` 使用 PyTorch 2.7/CUDA 12.8。先运行 `nvidia-smi` 确认 GPU 和驱动，再进行后续测试。
+
+## 4. 修改路径和单卡配置
+
+替换旧路径：
+
+```bash
+cd /data/genomine/NP-Master-web
+sed -i \
+  -e 's|/data/muskliu/npmaster|/data/genomine/npmaster|g' \
+  -e 's|/data/syh/NP-Master-web|/data/genomine/NP-Master-web|g' \
+  -e 's|/data/public_models/hub|/data/genomine/models/hub|g' \
+  backend/.env backend/runtime.env
+```
+
+在 `backend/.env` 末尾追加以下配置；如果已有同名变量，以追加的值为准：
+
+```bash
+cat >> backend/.env <<'EOF'
+NPMASTER_REPO_ROOT=/data/genomine/npmaster
+PYTHON_BIN=/data/genomine/conda/evo2_bgc/bin/python
+PRODIGAL_BIN=/data/genomine/conda/tools/bin/prodigal
+DIAMOND_BIN=/data/genomine/conda/tools/bin/diamond
+HMMER_BIN=/data/genomine/conda/tools/bin/hmmscan
+EXTRACT_HOSTS=localhost
+EXTRACT_GPUS_PER_HOST=1
+MODEL_DAEMON_GPUS=0
+WORKER_MAX_JOBS=1
+USE_PRECOMPUTED_9G_PROBS=false
+HF_HUB_CACHE=/data/genomine/models/hub
+HF_HUB_OFFLINE=1
+EOF
+```
+
+Supabase 配置已经在第 2 步复制，不需要重新创建项目或执行数据库迁移。
+
+## 5. 构建并启动服务
+
+### 5.1 验证构建
+
+```bash
+cd /data/genomine/npmaster
+/data/genomine/conda/evo2_bgc/bin/python -m pytest tests -q
+
+cd /data/genomine/NP-Master-web
 .local/venv/bin/python -m pytest backend/tests
 
 cd apps/web
@@ -107,61 +128,52 @@ npm run typecheck
 npm run build
 ```
 
-### 启动
+### 5.2 启动网站
 
-网站由维护人员配置为 systemd 服务，生产启动命令为：
+生产启动命令：
 
 ```bash
 cd /data/genomine/NP-Master-web/apps/web
 npm run start -- -H 127.0.0.1 -p 3000
 ```
 
-用 Nginx/Caddy 将 80/443 反代到 `127.0.0.1:3000` 并配置 HTTPS。若使用 Nginx，上传限制不能低于网站 FASTA 上限，例如 `client_max_body_size 50m`。
+由你配置 systemd 保活，并用 Nginx/Caddy 将 80/443 反代到 `127.0.0.1:3000`、配置 HTTPS。Nginx 上传限制可设为 `client_max_body_size 50m`。
 
-Worker 使用现有模板：
+### 5.3 启动 Worker
+
+先确认旧 Worker 已停止，避免两个 Worker 同时领取任务。然后在新服务器执行：
 
 ```bash
 cd /data/genomine/NP-Master-web
 sudo cp backend/systemd/npmaster-worker.service /etc/systemd/system/
-sudoedit /etc/systemd/system/npmaster-worker.service
-```
-
-把 `WorkingDirectory`、两个 `EnvironmentFile` 和 `ExecStart` 改为新路径。切换时先停旧 Worker，再执行：
-
-```bash
+sudo sed -i 's|/data/syh/NP-Master-web|/data/genomine/NP-Master-web|g' \
+  /etc/systemd/system/npmaster-worker.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now npmaster-worker
 journalctl -u npmaster-worker -f
 ```
 
-确认模型加载成功后，提交一个测试 FASTA，确认任务完成且结果可下载。
+确认 `runtime/cache/model_daemons/gpu0/daemon.log` 中 Evo2 和 U-Net 加载成功。
 
-## 4. 域名切换
+## 6. 验收并切换域名
 
-### 推荐：暂不迁移注册商
+1. 通过新服务器 IP 或临时域名打开网站，确认 `/api/health` 正常。
+2. 提交一个小型 FASTA，确认任务最终为 `done`，结果可以查看和下载。
+3. 确认 Supabase 中的任务记录、Storage 文件和 Worker 心跳正常。
+4. 网站和 Worker 都通过后，再切换 DNS。
 
-域名继续买在 Vercel，不需要 Vercel Pro：
+### 域名处理
 
-1. 先备份现有 DNS 记录，尤其是 MX、TXT 和子域名记录。
-2. Vercel Dashboard → **Domains** → `genomine.bio` → **Advanced Settings** → Vercel DNS。
-3. 将 `@` 和 `www` 的 A 记录指向新服务器公网 IP；新记录可覆盖 Vercel 默认记录。
-4. 验证：
+最简单的切换方式是在 Vercel Dashboard → **Domains** → `genomine.bio` → **Advanced Settings** → Vercel DNS 中，把 `@` 和 `www` 的 A 记录指向新服务器公网 IP。这样不需要迁移注册商，也不需要 Vercel Pro。
 
-```bash
-dig +short A genomine.bio
-dig +short A www.genomine.bio
-curl -I https://www.genomine.bio
-```
+如果按当前计划迁到阿里云：
 
-DNS 生效前保留 Vercel 项目用于回退。若需回退，删除指向新服务器的自定义 A 记录，恢复 Vercel 默认解析。
+1. 原负责人在 Vercel 的域名菜单中选择 **Transfer out**，提供 authorization code。
+2. 你在阿里云发起转入，并完成实名认证、DNS 和备案流程。
+3. 新网站服务器在中国大陆，先确认 ICP 备案要求，再将生产域名指向新服务器。
 
-### 可选：把域名迁出 Vercel
+切换前备份原有 DNS 记录，并保留现有 Vercel 项目用于回退。
 
-1. 确认新注册商支持 `.bio`，并确认域名没有注册/转移后 60 天锁等限制。
-2. Vercel Dashboard → **Domains** → 域名右侧三点菜单 → **Transfer out**，获取 authorization code。
-3. 在新注册商发起转入并提交授权码；Vercel 不需要再次确认，转移最长可能需要一周。
-4. 转移前复制全部 DNS 记录；若同时更换 nameservers，先在新 DNS 服务商重建并验证记录。
+### 迁移期间继续更新网站
 
-参考：[Vercel 域名转移说明](https://vercel.com/docs/domains/working-with-domains/transfer-your-domain)、[Vercel DNS 说明](https://vercel.com/docs/domains/managing-dns-records)。
-
-如果新网站服务器在中国大陆，先向云厂商确认 ICP备案、域名实名认证和注册商要求，再切换 DNS。
+两个 GitHub 仓库都是公开仓库。新维护人获得 GitHub 权限后，向 `main` 推送代码仍会触发原 Vercel 项目自动部署，不需要加入 Vercel 或购买会员。自托管切换完成后，再由你决定是否停用 Vercel 项目。
