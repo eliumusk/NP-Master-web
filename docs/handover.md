@@ -33,10 +33,10 @@ CUDA/驱动版本：
 
 旧服务器 SSH 地址为 `221.194.152.152`，本机 sshd 监听端口为 `2222`。新服务器只要能访问旧服务器 SSH，就可以主动拉取，不要求旧服务器反向访问新服务器。
 
-以下命令在**新服务器**执行。先替换旧服务器用户名；建议原负责人提供临时账号或临时密钥，迁移后撤销。
+以下命令在**新服务器**执行。旧服务器登录用户为 `root`，新服务器先配置好可登录旧服务器的 SSH 密钥。
 
 ```bash
-OLD_USER='<旧服务器用户名>'
+OLD_USER='root'
 OLD="$OLD_USER@221.194.152.152"
 export RSYNC_RSH='ssh -p 2222'
 
@@ -45,11 +45,6 @@ mkdir -p /data/genomine
 cd /data/genomine
 git clone https://github.com/eliumusk/NP-Master-web.git
 git clone https://github.com/eliumusk/npmaster.git
-
-cd /data/genomine/NP-Master-web
-git checkout <主仓库commit>
-cd /data/genomine/npmaster
-git checkout <模型仓库commit>
 
 mkdir -p \
   /data/genomine/models/hub \
@@ -87,7 +82,7 @@ rsync -a --info=progress2 \
 旧服务器已经存在两份完整配置，可用上一节的 SSH 连接直接复制到**新服务器**，不用逐项手抄密钥：
 
 ```bash
-OLD_USER='<旧服务器用户名>'
+OLD_USER='root'
 export RSYNC_RSH='ssh -p 2222'
 OLD="$OLD_USER@221.194.152.152"
 
