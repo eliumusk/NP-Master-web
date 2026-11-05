@@ -184,7 +184,7 @@ def test_precomputed_core_domains_skip_second_scan(tmp_path: Path, monkeypatch):
     assert result["region"][0]["pfam_domains"][0]["name"] == "Terpene"
 
 
-def test_worker_overlaps_two_jobs(monkeypatch):
+def test_worker_overlaps_two_jobs(monkeypatch, tmp_path):
     import sys
     import threading
     import time
@@ -216,7 +216,7 @@ def test_worker_overlaps_two_jobs(monkeypatch):
         poll_interval_sec=0.01,
         worker_id="test-worker",
         npmaster_repo_root=".",
-        npmaster_cache_dir=".",
+        npmaster_cache_dir=tmp_path,
     )
     jobs = [{"id": "job-1"}, {"id": "job-2"}]
     lock = threading.Lock()

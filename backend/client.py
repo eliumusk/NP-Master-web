@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from supabase import Client, create_client
@@ -36,21 +37,20 @@ def make_client(settings: Settings) -> Client:
     return create_client(settings.supabase_url, settings.supabase_service_role_key)
 
 
-@_retry
 def claim_next_job(supa: Client, worker_id: str) -> dict[str, Any] | None:
-    """Atomically claim one queued job. Returns the job row, or None.
+    return _claim_next_job(supa, worker_id, str(uuid4()))
 
-    Uses a Postgres function `claim_next_job(worker_id text)` defined in the
-    Supabase migration so the SELECT … FOR UPDATE SKIP LOCKED + UPDATE happens
-    server-side."""
-    res = supa.rpc("claim_next_job", {"worker": worker_id}).execute()
+
+@_retry
+def _claim_next_job(supa: Client, worker_id: str, claim_token: str) -> dict[str, Any] | None:
+    res = supa.rpc("claim_next_job", {"worker": worker_id, "token": claim_token}).execute()
     rows = res.data or []
     return rows[0] if rows else None
 
 
 @_retry
-def heartbeat(supa: Client, job_id: str) -> None:
-    supa.rpc("job_heartbeat", {"job": job_id}).execute()
+def heartbeat(supa: Client, job_id: str, claim_token: str) -> None:
+    supa.rpc("job_heartbeat", {"job": job_id, "token": claim_token}).execute()
 
 
 @_retry
